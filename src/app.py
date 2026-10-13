@@ -3,9 +3,10 @@ Bare-minimum web server for the "import player's dataset" story.
 
     python src/app.py        then open http://127.0.0.1:5001
 
-GET  /         -> upload.html (drop a .csv/.xlsx file)
-POST /upload   -> runs processInput.process_file on it, answers with JSON
-GET  /players  -> first few loaded players, just to prove the data is in Postgres
+GET  /                  -> upload.html (drop a .csv/.xlsx file)
+POST /upload            -> runs processInput.process_file on it, answers with JSON
+GET  /players           -> first few loaded players, just to prove the data is in Postgres
+POST /players/<id>/lock -> lock a player once he's drafted (409 if already taken)
 
 Xavier can restyle upload.html or move the form into the real front end. The only
 contract is: POST the file to /upload as form field "file", read back the JSON.
@@ -15,9 +16,11 @@ import os
 import tempfile
 from pathlib import Path
 
+import psycopg
 from flask import Flask, jsonify, request, send_from_directory
 from werkzeug.utils import secure_filename
 
+from draft import PlayerAlreadyLockedError, PlayerNotFoundError, lock_player
 from processInput import SUPPORTED_EXTENSIONS, get_connection, process_file
 
 HERE = Path(__file__).parent
@@ -65,6 +68,20 @@ def players():
         ])
     except Exception as e:  # tables not created yet, DB down, etc.
         return jsonify(ok=False, message=f"Couldn't read players: {type(e).__name__}"), 500
+
+
+@app.post("/players/<int:player_id>/lock")
+def lock(player_id):
+    try:
+        with get_connection() as conn:
+            lock_player(conn, player_id)
+    except PlayerNotFoundError as e:
+        return jsonify(ok=False, message=str(e)), 404
+    except PlayerAlreadyLockedError as e:
+        return jsonify(ok=False, message=str(e)), 409
+    except psycopg.Error as e:
+        return jsonify(ok=False, message=f"Database error, player not locked: {type(e).__name__}"), 500
+    return jsonify(ok=True, message=f"Player {player_id} is locked.")
 
 
 @app.errorhandler(413)
