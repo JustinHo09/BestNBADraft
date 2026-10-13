@@ -1,0 +1,5 @@
+pandas
+openpyxl          # lets pandas read .xlsx
+psycopg[binary]   # Postgres driver (v3). "binary" means no separate Postgres client install needed
+flask             # tiny web server for the upload page
+pytest            # tests

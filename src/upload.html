@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Import Players</title>
+<!--
+  Bare-minimum upload page for the "import player's dataset" story.
+  Xavier: restyle freely. The only part that matters is the fetch() at the bottom,
+  which POSTs the file to /upload as form field "file" and shows the JSON reply.
+-->
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 560px; margin: 40px auto; padding: 0 16px; }
+  #drop { border: 2px dashed #888; border-radius: 8px; padding: 32px; text-align: center; cursor: pointer; }
+  #drop.hover { background: #eef; }
+  #result { margin-top: 16px; white-space: pre-wrap; }
+  .ok { color: #11692f; }
+  .err { color: #b00020; }
+</style>
+</head>
+<body>
+  <h1>Import players</h1>
+  <div id="drop">Drop a .csv or .xlsx file here, or click to choose one</div>
+  <input id="picker" type="file" accept=".csv,.xlsx" hidden>
+  <div id="result"></div>
+
+<script>
+  const drop = document.getElementById("drop");
+  const picker = document.getElementById("picker");
+  const result = document.getElementById("result");
+
+  drop.addEventListener("click", () => picker.click());
+  picker.addEventListener("change", () => upload(picker.files[0]));
+
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("hover"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("hover"));
+  drop.addEventListener("drop", (e) => {
+    e.preventDefault();
+    drop.classList.remove("hover");
+    upload(e.dataTransfer.files[0]);
+  });
+
+  async function upload(file) {
+    if (!file) return;
+    if (!/\.(csv|xlsx)$/i.test(file.name)) {
+      show(false, "Must be a .csv or .xlsx file.", []);
+      return;
+    }
+    show(null, "Uploading " + file.name + "...", []);
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const res = await fetch("/upload", { method: "POST", body: form });
+      const data = await res.json();
+      show(data.ok, data.message, data.warnings || []);
+    } catch (err) {
+      show(false, "Couldn't reach the server.", []);
+    }
+    picker.value = "";  // lets you pick the same file again
+  }
+
+  function show(ok, message, warnings) {
+    result.className = ok === true ? "ok" : ok === false ? "err" : "";
+    result.textContent = message + warnings.map((w) => "\n- " + w).join("");
+  }
+</script>
+</body>
+</html>
