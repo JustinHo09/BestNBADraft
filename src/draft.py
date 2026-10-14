@@ -25,3 +25,18 @@ def is_locked(conn, player_id):
     if row is None:
         raise PlayerNotFoundError(f"No player with ID {player_id}.")
     return row[0]
+
+def get_player_salary(conn, player_id):
+    salary = conn.execute("SELECT salary FROM stats WHERE id = %s", (player_id,)).fetchone()
+    if salary is None:
+        raise PlayerNotFoundError(f"No player with ID {player_id}.")
+    return salary[0]
+
+# This is just the basic begining of a turn eventually we will need to keep track of actions for undo,
+# and if we plan to make turns a while loop or not.
+def turn(conn, player_id, group):
+    if not is_locked(conn, player_id):
+        if group.add_player(player_id, get_player_salary(conn, player_id)):
+            lock_player(conn, player_id)
+        else:
+            print("BROKE BROKE BROKE NOT ENOUGH MONEY TO BUY THIS PLAYER")
