@@ -9,10 +9,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from draft import PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player  # noqa: E402
+from draft import PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick  # noqa: E402
 from processInput import process_file  # noqa: E402
 
+
 TEST_DB = os.environ.get("TEST_DATABASE_URL")
+# This will stop the test for things that don't need the DB up from running
 pytestmark = pytest.mark.skipif(not TEST_DB, reason="set TEST_DATABASE_URL to run database tests")
 
 
@@ -104,3 +106,25 @@ def test_lock_route_when_database_is_down(db, monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://localhost:1/nothing_here")
     res = app.test_client().post("/players/1/lock")
     assert res.status_code == 500 and res.get_json()["ok"] is False
+
+def test_first_pick_seat():
+    assert seat_pick(1,3) == (1,1)
+
+def test_last_pick_seat():
+    assert seat_pick(3, 3) == (3, 1)
+
+def test_middle_pick_seat():
+    assert seat_pick(3, 5) == (3, 1)
+
+def test_new_round_pick_seat():
+    assert seat_pick(4,3) == (1,2)
+
+def test_invalid_groups_pick_seat():
+    assert seat_pick(4,0) == (-1,-1)
+    assert seat_pick(4, 6) == (-1, -1)
+    assert seat_pick(4, -10) == (-1, -1)
+    assert seat_pick(4, 60) == (-1, -1)
+
+def test_invalid_turns_pick_seat():
+    assert seat_pick(-4,4) == (-1,-1)
+    assert seat_pick(0, 3) == (-1, -1)

@@ -40,3 +40,10 @@ def turn(conn, player_id, group):
             lock_player(conn, player_id)
         else:
             print("BROKE BROKE BROKE NOT ENOUGH MONEY TO BUY THIS PLAYER")
+
+def seat_pick(pick_number, num_groups):
+    if 0 < pick_number and 2 < num_groups < 6:
+        group = (pick_number-1) % num_groups + 1
+        round = (pick_number-1) // num_groups + 1
+        return group, round
+    return -1,-1
