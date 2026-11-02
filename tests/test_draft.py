@@ -9,7 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from draft import PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick, na, set_up_draft, new_draft  # noqa: E402
+from draft import PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick, na, set_up_draft, new_draft, current_pick  # noqa: E402
 from processInput import process_file  # noqa: E402
 
 
@@ -138,8 +138,7 @@ def test_set_up_draft(db):
     set_up_draft(db)
     assert db.execute("SELECT COUNT(*) FROM groups").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
-    assert db.execute("SELECT COUNT(*) FROM current_state").fetchone()[0] == 1
-    assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 1
+    assert db.execute("SELECT COUNT(*) FROM current_state").fetchone()[0] == 0
 
 def test_start_new_draft(db):
     set_up_draft(db)
@@ -147,3 +146,12 @@ def test_start_new_draft(db):
     assert db.execute("SELECT COUNT(*) FROM groups").fetchone()[0] == 3
     assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 1
     assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
+
+def test_current_pick(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    turn = current_pick(db)
+    assert turn["pick_number"] == 1
+    assert turn["round"] == 1
+    assert turn["group"] == 1
+

@@ -8,6 +8,9 @@ class PlayerNotFoundError(Exception):
 class PlayerAlreadyLockedError(Exception):
     pass
 
+class GameOverError(Exception):
+    pass
+
 MIN_GROUP_SIZE = 3
 MAX_GROUP_SIZE = 5
 NUM_ROUNDS = 10
@@ -60,7 +63,6 @@ def na(value):
     return value
 
 def set_up_draft(conn):
-    conn.execute("TRUNCATE TABLE groups CASCADE")
     conn.execute("CREATE TABLE IF NOT EXISTS groups "
                  "( id SERIAL PRIMARY KEY,"
                  "name TEXT NOT NULL,"
@@ -81,11 +83,11 @@ def set_up_draft(conn):
                  "player_id INTEGER NOT NULL UNIQUE REFERENCES players (id)"
                  ")")
 
+    conn.execute("TRUNCATE TABLE groups, picks, current_state RESTART IDENTITY CASCADE")
+
 def new_draft(conn, group_names, salary_cap):
     if MIN_GROUP_SIZE <= len(group_names) <= MAX_GROUP_SIZE and salary_cap > 0:
-        conn.execute("TRUNCATE TABLE picks CASCADE")
-        conn.execute("TRUNCATE TABLE groups CASCADE")
-        conn.execute("TRUNCATE TABLE current_state CASCADE")
+        conn.execute("TRUNCATE TABLE groups, picks, current_state RESTART IDENTITY CASCADE")
         conn.execute('UPDATE players SET selected = False')
 
         i=1
@@ -93,3 +95,15 @@ def new_draft(conn, group_names, salary_cap):
             conn.execute('INSERT INTO groups (name, seat, salary_cap) VALUES (%s, %s, %s)', (group,i, salary_cap))
             i+=1
         conn.execute('INSERT INTO current_state (current_pick) VALUES (%s)',(1,))
+
+def current_pick(conn):
+    current_pick = conn.execute("SELECT current_pick FROM current_state").fetchone()[0]
+    num_groups = conn.execute("SELECT COUNT(*) FROM groups").fetchone()[0]
+    if current_pick > num_groups * NUM_ROUNDS:
+        raise GameOverError
+
+    current_seat, current_round = seat_pick(current_pick, num_groups)
+    current_group = conn.execute("SELECT id FROM groups WHERE seat = %s", (current_seat,)).fetchone()[0]
+    return {"pick_number": current_pick,"round": current_round,"group": current_group}
+
+
