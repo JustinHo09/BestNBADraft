@@ -19,13 +19,8 @@ class Group:
     def increase_salary(self, change: int):
         self.salary += change
 
-    def check_overbudget(self, player_salary:int):
-        if player_salary > self.salary:
-            # Temporary test print
-            print("BROKE ALERT, TOO BROKE TO BUY THIS PLAYER")
-            return True
-        else:
-            return False
+    def check_in_budget(self, player_salary:int):
+        return player_salary <= self.salary
 
     def add_player(self, player_id:int, player_salary:int):
         # Returns T/F to indicate weather or not it was successful draft.

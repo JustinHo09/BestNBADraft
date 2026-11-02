@@ -32,7 +32,7 @@ def get_player_salary(conn, player_id):
         raise PlayerNotFoundError(f"No player with ID {player_id}.")
     return salary[0]
 
-# This is just the basic begining of a turn eventually we will need to keep track of actions for undo,
+# This is just the basic beginning of a turn eventually we will need to keep track of actions for undo,
 # and if we plan to make turns a while loop or not.
 def turn(conn, player_id, group):
     if not is_locked(conn, player_id):
@@ -47,3 +47,11 @@ def seat_pick(pick_number, num_groups):
         round = (pick_number-1) // num_groups + 1
         return group, round
     return -1,-1
+
+# Changes None or Null in the database to be N/A like Dr.Best requested
+def na(value):
+    if value is None:
+        return "N/A"
+    if isinstance(value, str) and value.strip() == "":
+        return "N/A"
+    return value

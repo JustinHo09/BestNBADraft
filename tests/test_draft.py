@@ -9,13 +9,13 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from draft import PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick  # noqa: E402
+from draft import PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick, na  # noqa: E402
 from processInput import process_file  # noqa: E402
 
 
 TEST_DB = os.environ.get("TEST_DATABASE_URL")
 # This will stop the test for things that don't need the DB up from running
-pytestmark = pytest.mark.skipif(not TEST_DB, reason="set TEST_DATABASE_URL to run database tests")
+#pytestmark = pytest.mark.skipif(not TEST_DB, reason="set TEST_DATABASE_URL to run database tests")
 
 
 @pytest.fixture
@@ -128,3 +128,8 @@ def test_invalid_groups_pick_seat():
 def test_invalid_turns_pick_seat():
     assert seat_pick(-4,4) == (-1,-1)
     assert seat_pick(0, 3) == (-1, -1)
+
+def test_na():
+    assert na("") == 'N/A'
+    assert na(None) == 'N/A'
+    assert na("Hello") == 'Hello'
