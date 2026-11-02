@@ -5,38 +5,29 @@ This represents one instance of a group for the game
 
 class Group:
 
-    def __init__(self,group_name: str, salary_cap:int):
+    def __init__(self,id: int, group_name: str, salary_cap:int, spent:int):
+        self.id = id
         self.name = group_name
         self.salary = salary_cap
-        self.players = []
+        self.remaining = salary_cap - spent
 
     def get_salary(self):
         return self.salary
 
-    def reduce_salary(self, change: int):
-        self.salary -= change
+    def check_in_budget(self, player_salary:int):
+        return player_salary <= self.salary
 
-    def increase_salary(self, change: int):
-        self.salary += change
+def load_group_data(conn, group_id: int):
+    group = conn.execute("SELECT name, salary_cap FROM groups WHERE id = %s", (group_id,)).fetchone()
+    name = group[0]
+    cap = group[1]
 
-    def check_overbudget(self, player_salary:int):
-        if player_salary > self.salary:
-            # Temporary test print
-            print("BROKE ALERT, TOO BROKE TO BUY THIS PLAYER")
-            return True
-        else:
-            return False
+    rows = conn.execute("SELECT s.salary FROM picks p JOIN stats s on s.id = p.player_id "
+                            "WHERE p.group_id = %s", (group_id,)).fetchall()
+    spent = 0
+    for row in rows:
+        spent += row[0]
 
-    def add_player(self, player_id:int, player_salary:int):
-        # Returns T/F to indicate weather or not it was successful draft.
-        if not self.check_overbudget(player_salary):
-            self.players.append(player_id)
-            self.salary -= player_salary
-            return True
-        else:
-            return False
+    return Group(group_id,name,cap,spent)
 
-    def remove_player(self, player_id:int, player_salary:int):
-        self.players.remove(player_id)
-        self.salary += player_salary
 

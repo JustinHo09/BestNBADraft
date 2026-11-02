@@ -9,13 +9,13 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from draft import PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick  # noqa: E402
+from draft import PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick, na, set_up_draft, new_draft, current_pick  # noqa: E402
 from processInput import process_file  # noqa: E402
-
+from group import load_group_data
 
 TEST_DB = os.environ.get("TEST_DATABASE_URL")
 # This will stop the test for things that don't need the DB up from running
-pytestmark = pytest.mark.skipif(not TEST_DB, reason="set TEST_DATABASE_URL to run database tests")
+#pytestmark = pytest.mark.skipif(not TEST_DB, reason="set TEST_DATABASE_URL to run database tests")
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def db(monkeypatch, tmp_path):
     import psycopg
     monkeypatch.setenv("DATABASE_URL", TEST_DB)
     with psycopg.connect(TEST_DB, autocommit=True) as conn:
-        conn.execute("DROP TABLE IF EXISTS stats, players")
+        conn.execute("DROP TABLE IF EXISTS stats, players CASCADE")
         players = tmp_path / "players.csv"
         players.write_text("ID,Player,Salary\n1,First Guy,100\n2,Second Guy,200\n3,Third Guy,300\n")
         assert process_file(players)["ok"]
@@ -128,3 +128,44 @@ def test_invalid_groups_pick_seat():
 def test_invalid_turns_pick_seat():
     assert seat_pick(-4,4) == (-1,-1)
     assert seat_pick(0, 3) == (-1, -1)
+
+def test_na():
+    assert na("") == 'N/A'
+    assert na(None) == 'N/A'
+    assert na("Hello") == 'Hello'
+
+def test_set_up_draft(db):
+    set_up_draft(db)
+    assert db.execute("SELECT COUNT(*) FROM groups").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM current_state").fetchone()[0] == 0
+
+def test_start_new_draft(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    assert db.execute("SELECT COUNT(*) FROM groups").fetchone()[0] == 3
+    assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 1
+    assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
+
+def test_current_pick(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    turn = current_pick(db)
+    assert turn["pick_number"] == 1
+    assert turn["round"] == 1
+    assert turn["group"] == 1
+
+def test_group(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    first_group = db.execute("SELECT id FROM groups WHERE seat =1").fetchone()[0]
+    group = load_group_data(db, first_group)
+    assert group.remaining == 1000000
+
+def test_group_salary_down(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    first_group = db.execute("SELECT id FROM groups WHERE seat =1").fetchone()[0]
+    db.execute("INSERT INTO picks VALUES (1,1,%s,1)", (first_group,),)
+    group = load_group_data(db, first_group)
+    assert group.remaining == 1000000-100
