@@ -114,7 +114,7 @@ def current_pick(conn):
 def continue_turn(conn):
     turn = current_pick(conn)
     picked = conn.execute( "SELECT 1 FROM picks WHERE pick_number = %s",(turn["pick_number"],)).fetchone()
-    if picked != 1:
+    if picked is None:
         raise NoPickError("No pick has been made this turn")
     conn.execute("UPDATE current_state SET current_pick = current_pick + 1")
 
@@ -122,7 +122,7 @@ def make_pick(conn, player_id):
     turn = current_pick(conn)
 
     already = conn.execute("SELECT 1 FROM picks where pick_number = %s", (turn["pick_number"],)).fetchone()
-    if already == 1:
+    if already is not None:
         raise PickAlreadyMadeError("This a pick has already been made this turn")
 
     salary = get_player_salary(conn, player_id)
@@ -132,12 +132,32 @@ def make_pick(conn, player_id):
 
     group = load_group_data(conn, turn["group_id"])
     if not group.check_in_budget(salary):
-        raise NoSalaryError("No salary for this player")
-
-    continue_turn(conn)
+        raise OverBudgetError("This player can't be drafted too broke")
 
     lock_player(conn, player_id)
     conn.execute("INSERT INTO picks VALUES (%s, %s, %s, %s)",
                  (turn["pick_number"], turn["round"], turn["group"], player_id),)
 
     return turn
+
+def get_draft_data(conn):
+    groups = []
+    for row in conn.execute("SELECT id, name FROM groups ORDER BY seat").fetchall():
+        group = load_group_data(conn, row[0])
+        groups.append({"id": row[0], "name": row[1], "money_left":group.remaining})
+
+    picks = []
+    rows = conn.execute("SELECT p.round, g.seat, pl.name, s.position, s.team "
+                        "FROM picks p JOIN groups g ON g.id = p.group_id "
+                        "JOIN players pl ON p.player_id = pl.id "
+                        "JOIN stats s ON s.id = p.player_id "
+                        "ORDER BY p.pick_number").fetchall()
+    for row in rows:
+        picks.append({"round":row[0], "seat":row[1], "name":row[2], "position": na(row[3]),"team":na(row[4])})
+
+    try:
+        turn = current_pick(conn)
+        seat, round = seat_pick(turn["pick_number"], len(groups))
+    except GameOverError:
+        seat, round = None,None
+    return {"groups":groups, "picks":picks, "seat":seat, "round":round}
