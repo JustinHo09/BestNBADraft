@@ -8,6 +8,9 @@ class PlayerNotFoundError(Exception):
 class PlayerAlreadyLockedError(Exception):
     pass
 
+MIN_GROUP_SIZE = 3
+MAX_GROUP_SIZE = 5
+NUM_ROUNDS = 10
 
 def lock_player(conn, player_id):
     # only works if nobody picked him yet, so 2 teams can't both get him
@@ -55,3 +58,38 @@ def na(value):
     if isinstance(value, str) and value.strip() == "":
         return "N/A"
     return value
+
+def set_up_draft(conn):
+    conn.execute("TRUNCATE TABLE groups CASCADE")
+    conn.execute("CREATE TABLE IF NOT EXISTS groups "
+                 "( id SERIAL PRIMARY KEY,"
+                 "name TEXT NOT NULL,"
+                 "seat INTEGER NOT NULL UNIQUE,"
+                 "salary_cap INTEGER NOT NULL "
+                 ")")
+
+    conn.execute("CREATE TABLE IF NOT EXISTS current_state ("
+                 "id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),"
+                 "current_pick INTEGER NOT NULL DEFAULT 1,"
+                 "num_rounds INTEGER NOT NULL DEFAULT 10"
+                 ")")
+
+    conn.execute("CREATE TABLE IF NOT EXISTS picks ("
+                 "pick_number INTEGER PRIMARY KEY,"
+                 "round INTEGER NOT NULL,"
+                 "group_id INTEGER NOT NULL REFERENCES groups (id),"
+                 "player_id INTEGER NOT NULL UNIQUE REFERENCES players (id)"
+                 ")")
+
+def new_draft(conn, group_names, salary_cap):
+    if MIN_GROUP_SIZE <= len(group_names) <= MAX_GROUP_SIZE and salary_cap > 0:
+        conn.execute("TRUNCATE TABLE picks CASCADE")
+        conn.execute("TRUNCATE TABLE groups CASCADE")
+        conn.execute("TRUNCATE TABLE current_state CASCADE")
+        conn.execute('UPDATE players SET selected = False')
+
+        i=1
+        for group in group_names:
+            conn.execute('INSERT INTO groups (name, seat, salary_cap) VALUES (%s, %s, %s)', (group,i, salary_cap))
+            i+=1
+        conn.execute('INSERT INTO current_state (current_pick) VALUES (%s)',(1,))
