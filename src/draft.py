@@ -11,9 +11,23 @@ class PlayerAlreadyLockedError(Exception):
 class GameOverError(Exception):
     pass
 
+class PickAlreadyMadeError(Exception):
+    pass
+
+class NoSalaryError(Exception):
+    pass
+
+class OverBudgetError(Exception):
+    pass
+
+class NoPickError(Exception):
+    pass
+
 MIN_GROUP_SIZE = 3
 MAX_GROUP_SIZE = 5
 NUM_ROUNDS = 10
+
+from group import load_group_data
 
 def lock_player(conn, player_id):
     # only works if nobody picked him yet, so 2 teams can't both get him
@@ -37,15 +51,6 @@ def get_player_salary(conn, player_id):
     if salary is None:
         raise PlayerNotFoundError(f"No player with ID {player_id}.")
     return salary[0]
-
-# This is just the basic beginning of a turn eventually we will need to keep track of actions for undo,
-# and if we plan to make turns a while loop or not.
-def turn(conn, player_id, group):
-    if not is_locked(conn, player_id):
-        if group.add_player(player_id, get_player_salary(conn, player_id)):
-            lock_player(conn, player_id)
-        else:
-            print("BROKE BROKE BROKE NOT ENOUGH MONEY TO BUY THIS PLAYER")
 
 def seat_pick(pick_number, num_groups):
     if 0 < pick_number and 2 < num_groups < 6:
@@ -106,4 +111,33 @@ def current_pick(conn):
     current_group = conn.execute("SELECT id FROM groups WHERE seat = %s", (current_seat,)).fetchone()[0]
     return {"pick_number": current_pick,"round": current_round,"group": current_group}
 
+def continue_turn(conn):
+    turn = current_pick(conn)
+    picked = conn.execute( "SELECT 1 FROM picks WHERE pick_number = %s",(turn["pick_number"],)).fetchone()
+    if picked != 1:
+        raise NoPickError("No pick has been made this turn")
+    conn.execute("UPDATE current_state SET current_pick = current_pick + 1")
 
+def make_pick(conn, player_id):
+    turn = current_pick(conn)
+
+    already = conn.execute("SELECT 1 FROM picks where pick_number = %s", (turn["pick_number"],)).fetchone()
+    if already == 1:
+        raise PickAlreadyMadeError("This a pick has already been made this turn")
+
+    salary = get_player_salary(conn, player_id)
+
+    if salary is None:
+        raise NoSalaryError("No salary for this player so they can't be drafted")
+
+    group = load_group_data(conn, turn["group_id"])
+    if not group.check_in_budget(salary):
+        raise NoSalaryError("No salary for this player")
+
+    continue_turn(conn)
+
+    lock_player(conn, player_id)
+    conn.execute("INSERT INTO picks VALUES (%s, %s, %s, %s)",
+                 (turn["pick_number"], turn["round"], turn["group"], player_id),)
+
+    return turn
