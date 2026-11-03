@@ -41,6 +41,7 @@
   <!-- the draft itself -->
   <div id="draft" hidden>
     <h2 id="turn"></h2>
+    <p id="round-done"></p>
     <p id="money"></p>
     <form id="pick-form" autocomplete="off">
       Player ID: <input id="player-id" type="text" inputmode="numeric">
@@ -53,7 +54,7 @@
     <table id="board"></table>
 
     <h3>Available players</h3>
-    <p>Names stay hidden until the pick is made. Click a row to fill in the ID.</p>
+    <p>Names stay hidden until every team has picked that round. Click a row to fill in the ID.</p>
     <p>Filter: <input id="search" type="text" placeholder="ID or position"></p>
     <div id="list"><table id="players"></table></div>
 
@@ -124,6 +125,14 @@ function show() {
 
 function showTurn() {
   const d = state.draft;
+  // show how many players have been drafted once a round is done
+  if (d.is_over) {
+    $("round-done").textContent = "All " + d.drafted + " players drafted.";
+  } else if (d.round > 1) {
+    $("round-done").textContent = "Round " + (d.round - 1) + " is done, " + d.drafted + " players drafted so far.";
+  } else {
+    $("round-done").textContent = "";
+  }
   if (d.is_over) {
     $("turn").textContent = "Draft is over";
     $("money").textContent = "";
@@ -137,12 +146,13 @@ function showTurn() {
   $("turn").textContent = "Round " + d.round + ", pick " + d.pick_number + ": " + d.group_name + "'s turn";
   $("money").textContent = money(group.money_left) + " left of " + money(group.salary_cap);
 
-  // after a pick show the name and turn on Next turn, before a pick only the ID box works
+  // after a pick turn on Next turn, before a pick only the ID box works
+  // no name here, it waits until the round is done
   const pick = d.picks.find((p) => p.pick_number === d.pick_number);
   $("player-id").disabled = $("pick-btn").disabled = !!pick;
   $("next-btn").disabled = !pick;
-  $("reveal").innerHTML = pick
-    ? `${esc(d.group_name)} picks <span class="name">${esc(pick.name)}</span> (${esc(pick.position)}, ${esc(teamName(pick.team))}, ${money(pick.salary)})`
+  $("reveal").textContent = pick
+    ? d.group_name + "'s pick is locked in. Names show once every team has picked this round."
     : "";
 }
 
@@ -160,7 +170,8 @@ function showBoard() {
       const p = picks[r + "-" + g.seat];
       const now = !d.is_over && d.round === r && d.seat === g.seat;
       html += `<td class="${now ? "now" : ""}">`;
-      if (p) html += `<span class="name">${esc(p.name)}</span><br><span class="info">${esc(p.position)}, ${esc(teamName(p.team))}</span>`;
+      if (p && p.revealed) html += `<span class="name">${esc(p.name)}</span><br><span class="info">${esc(p.position)}, ${esc(teamName(p.team))}</span>`;
+      else if (p) html += `<span class="info">Pick locked in</span>`;  // picked, but the round isn't over yet
       html += "</td>";
     }
     html += "</tr>";

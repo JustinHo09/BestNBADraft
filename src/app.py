@@ -20,6 +20,7 @@ contract is: POST the file to /upload as form field "file", read back the JSON.
 # POST /api/draft/pick           {"player_id": 13070} for whoever is on the clock
 # POST /api/draft/next           next turn (only after a pick)
 # GET  /api/players/available    undrafted players with no names since it's a blind draft
+# picks show as "Pick locked in" until every team has picked that round (see hide_current_round)
 
 import os
 import tempfile
@@ -150,13 +151,34 @@ FRIENDLY = {
 }
 
 
+# Justin's idea: don't show who got picked until every team has picked that round
+# a pick shows once the draft is past that round, or once the draft is over
+# doing it here and not in the html so the names don't get sent to the browser early
+# (otherwise anyone could see them in the network tab, or on the projector/phones)
+def hide_current_round(draft):
+    drafted = 0
+    for pick in draft["picks"]:
+        if draft["is_over"] or pick["round"] < draft["round"]:
+            pick["revealed"] = True
+            drafted = drafted + 1
+        else:
+            pick["revealed"] = False
+            pick["name"] = None
+            pick["position"] = None
+            pick["team"] = None
+            pick["salary"] = None
+            pick["player_id"] = None
+    draft["drafted"] = drafted  # for the "Round 1 is done, 3 players drafted" line
+    return draft
+
+
 # runs one draft step and always sends back JSON
 # everything is one transaction, so if something fails the whole step gets undone
 def draft_action(action):
     try:
         with get_connection() as conn:
             extra = action(conn) or {}
-            return jsonify(ok=True, draft=get_draft_data(conn), **extra)
+            return jsonify(ok=True, draft=hide_current_round(get_draft_data(conn)), **extra)
     except tuple(DRAFT_ERRORS) as e:
         status = next(code for cls, code in DRAFT_ERRORS.items() if isinstance(e, cls))
         message = FRIENDLY.get(type(e)) or str(e) or type(e).__name__
@@ -174,7 +196,7 @@ def draft_state():
             players = _count_players(conn)
             started = conn.execute("SELECT to_regclass('current_state')").fetchone()[0] is not None \
                 and conn.execute("SELECT COUNT(*) FROM current_state").fetchone()[0] == 1
-            draft = get_draft_data(conn) if started else None
+            draft = hide_current_round(get_draft_data(conn)) if started else None
         return jsonify(ok=True, started=started, players_loaded=players, draft=draft)
     except psycopg.Error as e:
         return jsonify(ok=False, message=f"Couldn't reach the database: {type(e).__name__}"), 500
@@ -208,13 +230,8 @@ def draft_pick():
 
     def pick(conn):
         turn = make_pick(conn, player_id)
-        name, position, team, salary = conn.execute(
-            "SELECT p.name, s.position, s.team, s.salary FROM players p JOIN stats s USING (id) WHERE id = %s",
-            (player_id,),
-        ).fetchone()
-        # name reveal, this is the first time the page finds out who the ID was
-        return {"player": {"id": player_id, "name": name, "position": position, "team": team,
-                           "salary": salary, "pick_number": turn["pick_number"], "round": turn["round"]}}
+        # don't send the name back yet, it shows on the board once the round is done
+        return {"pick": {"pick_number": turn["pick_number"], "round": turn["round"]}}
 
     return draft_action(pick)
 
