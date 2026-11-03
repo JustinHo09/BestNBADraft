@@ -43,18 +43,50 @@ def test_state_before_any_draft(client):
     assert data["ok"] and data["started"] is False and data["players_loaded"] == 41
 
 
-def test_pick_reveals_name_and_fills_the_grid(client):
+def test_pick_fills_the_grid_but_stays_hidden(client):
     start(client)
     res = client.post("/api/draft/pick", json={"player_id": 7})
     data = res.get_json()
     assert res.status_code == 200
-    assert data["player"]["name"] == "Player 7"
+    assert data["pick"] == {"pick_number": 1, "round": 1}
+    # the spot on the board is filled but nobody can see who it is yet
     assert data["draft"]["picks"] == [{
-        "round": 1, "seat": 1, "name": "Player 7", "position": "PG", "team": "N/A",
-        "pick_number": 1, "player_id": 7, "salary": 10,
+        "round": 1, "seat": 1, "name": None, "position": None, "team": None,
+        "pick_number": 1, "player_id": None, "salary": None, "revealed": False,
     }]
+    assert b"Player 7" not in res.data   # not anywhere in what gets sent to the browser
     assert data["draft"]["pick_made"] is True
     assert data["draft"]["groups"][0]["money_left"] == 990
+
+
+def test_names_show_once_every_team_has_picked_the_round(client):
+    start(client)
+    for pid in (7, 8, 9):                         # A, B, C all pick in round 1
+        client.post("/api/draft/pick", json={"player_id": pid})
+        d = client.post("/api/draft/next").get_json()["draft"]
+        if pid != 9:
+            for p in d["picks"]:
+                assert p["revealed"] is False   # still in round 1, so everything is hidden
+    # round 2 just started, so round 1 shows up with names
+    assert d["round"] == 2
+    assert [p["name"] for p in d["picks"]] == ["Player 7", "Player 8", "Player 9"]
+    assert d["drafted"] == 3
+    # a round 2 pick stays hidden while round 1 stays shown
+    client.post("/api/draft/pick", json={"player_id": 10})
+    d = client.get("/api/draft").get_json()["draft"]
+    assert [p["revealed"] for p in d["picks"]] == [True, True, True, False]
+    assert d["drafted"] == 3
+
+
+def test_everything_shows_when_the_draft_is_over(client):
+    start(client)
+    for pid in range(1, 31):                      # 3 teams x 10 rounds
+        client.post("/api/draft/pick", json={"player_id": pid})
+        client.post("/api/draft/next")
+    d = client.get("/api/draft").get_json()["draft"]
+    assert d["is_over"] and d["drafted"] == 30
+    for p in d["picks"]:
+        assert p["revealed"] is True
 
 
 def test_next_turn_moves_to_the_next_team_then_the_next_round(client):
