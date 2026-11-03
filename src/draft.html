@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Best NBA Draft</title>
+<!--
+  draft board page, all the data comes from the routes listed at the top of app.py
+  Xavier can restyle whatever, just keep the fetch calls at the bottom
+-->
+<style>
+  body { font-family: system-ui, sans-serif; margin: 20px; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #eee; }
+  /* name a little bigger than the position and team under it */
+  .name { font-size: 1.1em; font-weight: bold; }
+  .info { color: #555; font-size: 0.85em; }
+  .now { background: #fff6cc; }
+  .err { color: #b00020; }
+  #board td + td { min-width: 140px; height: 40px; }
+  #list { max-height: 400px; overflow-y: auto; display: inline-block; }
+</style>
+</head>
+<body>
+  <p><a href="/">Import players</a></p>
+  <h1>Best NBA Draft</h1>
+
+  <!-- shows before there's a draft (or after clicking New draft) -->
+  <div id="setup" hidden>
+    <h2>Start a draft</h2>
+    <p id="players-loaded"></p>
+    <p>Teams (3 to 5):</p>
+    <div id="team-inputs"></div>
+    <p><button id="add-team" type="button">Add team</button> <button id="remove-team" type="button">Remove team</button></p>
+    <p>Salary cap per team: $<input id="cap" type="number" value="110000000"></p>
+    <button id="start" type="button">Start draft</button> <button id="cancel" type="button">Cancel</button>
+    <p id="setup-msg" class="err"></p>
+  </div>
+
+  <!-- the draft itself -->
+  <div id="draft" hidden>
+    <h2 id="turn"></h2>
+    <p id="money"></p>
+    <form id="pick-form" autocomplete="off">
+      Player ID: <input id="player-id" type="text" inputmode="numeric">
+      <button id="pick-btn" type="submit">Draft</button>
+    </form>
+    <p id="reveal"></p>
+    <button id="next-btn" type="button">Next turn</button>
+    <p id="pick-msg" class="err"></p>
+
+    <table id="board"></table>
+
+    <h3>Available players</h3>
+    <p>Names stay hidden until the pick is made. Click a row to fill in the ID.</p>
+    <p>Filter: <input id="search" type="text" placeholder="ID or position"></p>
+    <div id="list"><table id="players"></table></div>
+
+    <p><button id="new-draft" type="button">New draft</button></p>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null;      // last thing /api/draft sent back
+let available = [];
+let setupOpen = false;
+
+// helpers
+function money(n) {
+  if (n === null || n === undefined) return "N/A";
+  if (n >= 1000000) return "$" + (n / 1000000).toFixed(1) + "M";
+  return "$" + n.toLocaleString();
+}
+
+// 2TM / 3TM in the file means he played for 2 or 3 teams that season
+function teamName(team) {
+  const m = /^(\d)TM$/.exec(team || "");
+  return m ? m[1] + " teams" : team;
+}
+
+function esc(text) {
+  const div = document.createElement("div");
+  div.textContent = text ?? "";
+  return div.innerHTML;
+}
+
+async function api(path, body) {
+  const options = body === undefined ? {} :
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  try {
+    const res = await fetch(path, options);
+    return await res.json();
+  } catch (err) {
+    return { ok: false, message: "Can't reach the server. Is python src/app.py running?" };
+  }
+}
+
+// loading
+async function refresh() {
+  const data = await api("/api/draft");
+  if (!data.ok) { $("pick-msg").textContent = data.message; return; }
+  state = data;
+  show();
+}
+
+async function loadAvailable() {
+  const data = await api("/api/players/available");
+  available = data.ok ? data.players : [];
+  showAvailable();
+}
+
+// showing everything on the page
+function show() {
+  const started = state.started && !setupOpen;
+  $("setup").hidden = started;
+  $("draft").hidden = !started;
+  $("cancel").hidden = !state.started;
+  $("players-loaded").innerHTML = state.players_loaded
+    ? state.players_loaded + " players loaded."
+    : 'No players loaded yet. <a href="/">Import a player file</a> first.';
+  if (started) { showTurn(); showBoard(); }
+}
+
+function showTurn() {
+  const d = state.draft;
+  if (d.is_over) {
+    $("turn").textContent = "Draft is over";
+    $("money").textContent = "";
+    $("reveal").textContent = "";
+    $("pick-form").hidden = $("next-btn").hidden = true;
+    return;
+  }
+  $("pick-form").hidden = $("next-btn").hidden = false;
+
+  const group = d.groups.find((g) => g.seat === d.seat);
+  $("turn").textContent = "Round " + d.round + ", pick " + d.pick_number + ": " + d.group_name + "'s turn";
+  $("money").textContent = money(group.money_left) + " left of " + money(group.salary_cap);
+
+  // after a pick show the name and turn on Next turn, before a pick only the ID box works
+  const pick = d.picks.find((p) => p.pick_number === d.pick_number);
+  $("player-id").disabled = $("pick-btn").disabled = !!pick;
+  $("next-btn").disabled = !pick;
+  $("reveal").innerHTML = pick
+    ? `${esc(d.group_name)} picks <span class="name">${esc(pick.name)}</span> (${esc(pick.position)}, ${esc(teamName(pick.team))}, ${money(pick.salary)})`
+    : "";
+}
+
+function showBoard() {
+  const d = state.draft;
+  const picks = {};
+  for (const p of d.picks) picks[p.round + "-" + p.seat] = p;
+
+  let html = "<tr><th>Round</th>";
+  for (const g of d.groups) html += `<th>${esc(g.name)}<br><span class="info">${money(g.money_left)} left</span></th>`;
+  html += "</tr>";
+  for (let r = 1; r <= d.num_rounds; r++) {
+    html += `<tr><td>${r}</td>`;
+    for (const g of d.groups) {
+      const p = picks[r + "-" + g.seat];
+      const now = !d.is_over && d.round === r && d.seat === g.seat;
+      html += `<td class="${now ? "now" : ""}">`;
+      if (p) html += `<span class="name">${esc(p.name)}</span><br><span class="info">${esc(p.position)}, ${esc(teamName(p.team))}</span>`;
+      html += "</td>";
+    }
+    html += "</tr>";
+  }
+  $("board").innerHTML = html;
+}
+
+function showAvailable() {
+  const q = $("search").value.trim().toLowerCase();
+  let html = "<tr><th>ID</th><th>Pos</th><th>G</th><th>PTS</th><th>REB</th><th>AST</th><th>Salary</th></tr>";
+  for (const p of available) {
+    if (q && !String(p.id).startsWith(q) && String(p.position).toLowerCase() !== q) continue;
+    html += `<tr data-id="${p.id}"><td>${p.id}</td><td>${esc(p.position)}</td><td>${p.g ?? "N/A"}</td>` +
+            `<td>${p.pts ?? "N/A"}</td><td>${p.trb ?? "N/A"}</td><td>${p.ast ?? "N/A"}</td><td>${money(p.salary)}</td></tr>`;
+  }
+  $("players").innerHTML = html;
+}
+
+// setup
+function teamInputs(names) {
+  $("team-inputs").innerHTML = names.map((n, i) =>
+    `<p>Team ${i + 1}: <input type="text" value="${esc(n)}" maxlength="40"></p>`).join("");
+  $("add-team").disabled = names.length >= 5;
+  $("remove-team").disabled = names.length <= 3;
+}
+function teamNames() { return [...$("team-inputs").querySelectorAll("input")].map((i) => i.value); }
+
+$("add-team").onclick = () => { const n = teamNames(); teamInputs([...n, "Team " + (n.length + 1)]); };
+$("remove-team").onclick = () => teamInputs(teamNames().slice(0, -1));
+
+$("start").onclick = async () => {
+  $("setup-msg").textContent = "";
+  const data = await api("/api/draft/new", { group_names: teamNames(), salary_cap: Number($("cap").value) });
+  if (!data.ok) { $("setup-msg").textContent = data.message; return; }
+  setupOpen = false;
+  await refresh();
+  await loadAvailable();
+  $("player-id").focus();
+};
+
+// nothing gets cleared until Start draft is clicked, Cancel goes back to the board
+$("new-draft").onclick = () => {
+  setupOpen = true;
+  teamInputs(state.draft.groups.map((g) => g.name));
+  show();
+};
+$("cancel").onclick = () => { setupOpen = false; show(); };
+
+// making picks
+$("pick-form").onsubmit = async (e) => {
+  e.preventDefault();
+  $("pick-msg").textContent = "";
+  const id = $("player-id").value.trim();
+  if (!id) { $("pick-msg").textContent = "Enter a player ID."; return; }
+  const data = await api("/api/draft/pick", { player_id: id });
+  if (!data.ok) { $("pick-msg").textContent = data.message; return; }
+  $("player-id").value = "";
+  state.draft = data.draft;
+  show();
+  loadAvailable();
+  $("next-btn").focus();  // so hitting Enter again goes to the next turn
+};
+
+$("next-btn").onclick = async () => {
+  $("pick-msg").textContent = "";
+  const data = await api("/api/draft/next", {});
+  if (!data.ok) { $("pick-msg").textContent = data.message; return; }
+  state.draft = data.draft;
+  show();
+  $("player-id").focus();
+};
+
+$("search").oninput = showAvailable;
+$("players").onclick = (e) => {
+  const row = e.target.closest("tr[data-id]");
+  if (!row || $("player-id").disabled) return;
+  $("player-id").value = row.dataset.id;
+  $("player-id").focus();
+};
+
+// start
+teamInputs(["Team 1", "Team 2", "Team 3"]);
+refresh().then(loadAvailable);
+// checks every 3 seconds so other screens (projector, phones) keep up with the picks
+setInterval(() => { if (!document.hidden && !setupOpen) refresh(); }, 3000);
+</script>
+</body>
+</html>

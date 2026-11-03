@@ -16,13 +16,26 @@
   #result { margin-top: 16px; white-space: pre-wrap; }
   .ok { color: #11692f; }
   .err { color: #b00020; }
+  /* player list, name a little bigger than the position and team */
+  table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+  td { border-bottom: 1px solid #ddd; padding: 4px; }
+  .name { font-size: 1.1em; font-weight: bold; }
+  .info { color: #555; font-size: 0.9em; }
 </style>
 </head>
 <body>
+  <p><a href="/draft">Go to the draft board</a></p>
   <h1>Import players</h1>
   <div id="drop">Drop a .csv or .xlsx file here, or click to choose one</div>
   <input id="picker" type="file" accept=".csv,.xlsx" hidden>
   <div id="result"></div>
+
+  <!-- every loaded player shows up here, no IDs since the ID is only for typing in a pick -->
+  <div id="roster" hidden>
+    <h2 id="roster-title"></h2>
+    <input id="filter" type="text" placeholder="Filter by name, position or team">
+    <table id="players"></table>
+  </div>
 
 <script>
   const drop = document.getElementById("drop");
@@ -53,6 +66,7 @@
       const res = await fetch("/upload", { method: "POST", body: form });
       const data = await res.json();
       show(data.ok, data.message, data.warnings || []);
+      if (data.ok) loadPlayers();  // show the new players
     } catch (err) {
       show(false, "Couldn't reach the server.", []);
     }
@@ -63,6 +77,49 @@
     result.className = ok === true ? "ok" : ok === false ? "err" : "";
     result.textContent = message + warnings.map((w) => "\n- " + w).join("");
   }
+
+  // player list
+  let players = [];
+  const filter = document.getElementById("filter");
+
+  async function loadPlayers() {
+    try {
+      const data = await (await fetch("/api/players")).json();
+      players = data.ok ? data.players : [];
+    } catch (err) {
+      players = [];
+    }
+    document.getElementById("roster").hidden = players.length === 0;
+    document.getElementById("roster-title").textContent = players.length + " players loaded";
+    filter.value = "";
+    showPlayers();
+  }
+
+  // 2TM / 3TM in the file means he played for 2 or 3 teams that season
+  function teamName(team) {
+    const m = /^(\d)TM$/.exec(team || "");
+    return m ? m[1] + " teams" : (team || "N/A");
+  }
+
+  function esc(text) {
+    const div = document.createElement("div");
+    div.textContent = text ?? "";
+    return div.innerHTML;
+  }
+
+  function showPlayers() {
+    const q = filter.value.trim().toLowerCase();
+    let rows = "";
+    for (const p of players) {
+      const info = (p.position || "N/A") + ", " + teamName(p.team);
+      if (q && !(p.name + " " + info).toLowerCase().includes(q)) continue;
+      rows += `<tr><td><span class="name">${esc(p.name)}</span><br><span class="info">${esc(info)}</span></td></tr>`;
+    }
+    document.getElementById("players").innerHTML = rows;
+  }
+
+  filter.addEventListener("input", showPlayers);
+  loadPlayers();  // show whoever is already loaded when the page opens
 </script>
 </body>
 </html>

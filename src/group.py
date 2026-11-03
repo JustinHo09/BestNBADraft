@@ -15,7 +15,8 @@ class Group:
         return self.salary
 
     def check_in_budget(self, player_salary:int):
-        return player_salary <= self.salary
+        # check against the money left, not the whole cap, or a team could spend $110M every round
+        return player_salary <= self.remaining
 
 def load_group_data(conn, group_id: int):
     group = conn.execute("SELECT name, salary_cap FROM groups WHERE id = %s", (group_id,)).fetchone()

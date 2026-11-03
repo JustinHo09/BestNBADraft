@@ -23,6 +23,9 @@ class OverBudgetError(Exception):
 class NoPickError(Exception):
     pass
 
+class NoDraftError(Exception):
+    pass
+
 MIN_GROUP_SIZE = 3
 MAX_GROUP_SIZE = 5
 NUM_ROUNDS = 10
@@ -100,9 +103,15 @@ def new_draft(conn, group_names, salary_cap):
             conn.execute('INSERT INTO groups (name, seat, salary_cap) VALUES (%s, %s, %s)', (group,i, salary_cap))
             i+=1
         conn.execute('INSERT INTO current_state (current_pick) VALUES (%s)',(1,))
+    else:
+        # before this it just did nothing, so the board got stuck with no draft and no error
+        raise ValueError(f"Need {MIN_GROUP_SIZE}-{MAX_GROUP_SIZE} groups and a salary cap above 0.")
 
 def current_pick(conn):
-    current_pick = conn.execute("SELECT current_pick FROM current_state").fetchone()[0]
+    row = conn.execute("SELECT current_pick FROM current_state").fetchone()
+    if row is None:  # new_draft hasn't been run yet
+        raise NoDraftError("No draft has been started yet.")
+    current_pick = row[0]
     num_groups = conn.execute("SELECT COUNT(*) FROM groups").fetchone()[0]
     if current_pick > num_groups * NUM_ROUNDS:
         raise GameOverError
@@ -130,7 +139,8 @@ def make_pick(conn, player_id):
     if salary is None:
         raise NoSalaryError("No salary for this player so they can't be drafted")
 
-    group = load_group_data(conn, turn["group_id"])
+    # current_pick returns the group as "group", not "group_id" (that was causing a KeyError)
+    group = load_group_data(conn, turn["group"])
     if not group.check_in_budget(salary):
         raise OverBudgetError("This player can't be drafted too broke")
 
@@ -140,24 +150,46 @@ def make_pick(conn, player_id):
 
     return turn
 
+# everything the board needs in one call
+# added seat and salary_cap for each group, pick_number, player_id and salary for each pick,
+# and who is on the clock plus whether they picked yet
 def get_draft_data(conn):
     groups = []
-    for row in conn.execute("SELECT id, name FROM groups ORDER BY seat").fetchall():
+    for row in conn.execute("SELECT id, name, seat, salary_cap FROM groups ORDER BY seat").fetchall():
         group = load_group_data(conn, row[0])
-        groups.append({"id": row[0], "name": row[1], "money_left":group.remaining})
+        groups.append({"id": row[0], "name": row[1], "seat": row[2], "salary_cap": row[3],
+                       "money_left": group.remaining})
 
     picks = []
-    rows = conn.execute("SELECT p.round, g.seat, pl.name, s.position, s.team "
+    rows = conn.execute("SELECT p.round, g.seat, pl.name, s.position, s.team, p.pick_number, p.player_id, s.salary "
                         "FROM picks p JOIN groups g ON g.id = p.group_id "
                         "JOIN players pl ON p.player_id = pl.id "
                         "JOIN stats s ON s.id = p.player_id "
                         "ORDER BY p.pick_number").fetchall()
     for row in rows:
-        picks.append({"round":row[0], "seat":row[1], "name":row[2], "position": na(row[3]),"team":na(row[4])})
+        picks.append({"round":row[0], "seat":row[1], "name":row[2], "position": na(row[3]),"team":na(row[4]),
+                      "pick_number": row[5], "player_id": row[6], "salary": row[7]})
 
+    pick_number, group_name, pick_made = None, None, False
     try:
         turn = current_pick(conn)
         seat, round = seat_pick(turn["pick_number"], len(groups))
+        pick_number = turn["pick_number"]
+        group_name = next(g["name"] for g in groups if g["id"] == turn["group"])
+        pick_made = any(p["pick_number"] == pick_number for p in picks)
     except GameOverError:
         seat, round = None,None
-    return {"groups":groups, "picks":picks, "seat":seat, "round":round}
+    return {"groups":groups, "picks":picks, "seat":seat, "round":round,
+            "pick_number": pick_number, "group_name": group_name, "pick_made": pick_made,
+            "num_rounds": NUM_ROUNDS, "is_over": seat is None}
+
+
+# undrafted players for the list on the board
+# no names since it's a blind draft, the name only shows up after the ID is typed in
+def get_available_players(conn, limit=500):
+    rows = conn.execute("SELECT p.id, s.position, s.g, s.pts, s.trb, s.ast, s.fg_pct, s.salary "
+                        "FROM players p JOIN stats s ON s.id = p.id "
+                        "WHERE p.selected = FALSE "
+                        "ORDER BY s.pts DESC NULLS LAST, p.id LIMIT %s", (limit,)).fetchall()
+    return [{"id": r[0], "position": na(r[1]), "g": r[2], "pts": r[3], "trb": r[4], "ast": r[5],
+             "fg_pct": r[6], "salary": r[7]} for r in rows]
