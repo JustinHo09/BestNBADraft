@@ -151,6 +151,7 @@ def readFile(filename, warnings: list[str] | None = None) -> pd.DataFrame:
     # Ignore stray spaces in headers (" Salary " still counts as "Salary") and letter case.
     df.columns = [str(c).strip() for c in df.columns]
     df = df.rename(columns=_match_headers(df.columns))
+    df = _join_first_and_last_name(df)
 
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:
@@ -243,6 +244,36 @@ def _match_headers(headers) -> dict:
     return {h: wanted[h.lower()] for h in headers if h.lower() in wanted}
 
 
+FIRST_NAME_HEADERS = {"first name", "first", "firstname", "first_name"}
+LAST_NAME_HEADERS = {"last name", "last", "lastname", "last_name"}
+
+
+# Master.xlsx has one "Player" column with the full name
+# if a file has First Name and Last Name columns instead, put them together into "Player"
+def _join_first_and_last_name(df: pd.DataFrame) -> pd.DataFrame:
+    if "Player" in df.columns:
+        return df
+    first = next((c for c in df.columns if c.lower() in FIRST_NAME_HEADERS), None)
+    last = next((c for c in df.columns if c.lower() in LAST_NAME_HEADERS), None)
+    if first is None or last is None:
+        return df  # the missing column check after this says what's wrong
+    full = df[first].astype("string").fillna("").str.strip() + " " + df[last].astype("string").fillna("").str.strip()
+    df = df.drop(columns=[first, last])
+    df["Player"] = full.str.strip().replace("", pd.NA)
+    return df
+
+
+# every player as name, position and team for the import page, sorted by last name
+# no IDs since the ID is only for typing in a pick
+def loaded_players(conn: psycopg.Connection) -> list[dict]:
+    rows = conn.execute(
+        "SELECT p.name, s.position, s.team FROM players p JOIN stats s ON s.id = p.id"
+    ).fetchall()
+    players = [{"name": r[0], "position": r[1], "team": r[2]} for r in rows]
+    players.sort(key=lambda p: (p["name"].split()[-1].lower(), p["name"].lower()))
+    return players
+
+
 def _to_number(column: pd.Series) -> pd.Series:
     """Convert a column to numbers. '$1,234' -> 1234. Anything else non-numeric -> blank."""
     as_text = column.astype("string").str.replace(r"[$,\s]", "", regex=True)
@@ -315,7 +346,13 @@ def load_into_db(df: pd.DataFrame, conn: psycopg.Connection) -> None:
         set_up_db(conn)
         with conn.cursor() as cursor:
             # New upload = new player pool. (Open question for the team, see README.)
-            cursor.execute("TRUNCATE stats, players")
+            # CASCADE also clears picks since picks point at players
+            # without it, importing again after a draft started fails with a foreign key error
+            cursor.execute("TRUNCATE stats, players CASCADE")
+            # the old picks are gone now so send the draft back to pick 1 (if there is one)
+            cursor.execute("SELECT to_regclass('current_state')")
+            if cursor.fetchone()[0] is not None:
+                cursor.execute("UPDATE current_state SET current_pick = 1")
             insert_players(df, cursor)
             insert_stats(df, cursor)
 

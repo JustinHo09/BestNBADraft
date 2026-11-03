@@ -121,7 +121,7 @@ def db(monkeypatch):
     import psycopg
     monkeypatch.setenv("DATABASE_URL", TEST_DB)
     with psycopg.connect(TEST_DB, autocommit=True) as conn:
-        conn.execute("DROP TABLE IF EXISTS stats, players")
+        conn.execute("DROP TABLE IF EXISTS picks, current_state, groups, stats, players CASCADE")
         yield conn
 
 
@@ -170,3 +170,19 @@ def test_upload_route(db, tmp_path):
     res = client.post("/upload", data={"file": (open(csv_path, "rb"), "players.txt")})
     assert res.status_code == 400
     assert client.get("/players").get_json()["total_players"] == 1
+
+
+# separate first and last name columns
+
+def test_first_and_last_name_columns_become_the_full_name(tmp_path):
+    path = write_csv(tmp_path, "ID,First Name,Last Name,Pos,Team\n1,LeBron,James,SF,CLE\n2,Kevin, Garnett ,PF,MIN\n")
+    warnings = []
+    df = readFile(path, warnings)
+    assert list(df["Player"]) == ["LeBron James", "Kevin Garnett"]
+    assert not any("First Name" in w for w in warnings)  # not reported as an ignored column
+
+
+def test_only_a_first_name_column_still_asks_for_player(tmp_path):
+    path = write_csv(tmp_path, "ID,First Name,Pos\n1,LeBron,SF\n")
+    with pytest.raises(InputFileError, match="Player"):
+        readFile(path)

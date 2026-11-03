@@ -23,7 +23,8 @@ def db(monkeypatch, tmp_path):
     import psycopg
     monkeypatch.setenv("DATABASE_URL", TEST_DB)
     with psycopg.connect(TEST_DB, autocommit=True) as conn:
-        conn.execute("DROP TABLE IF EXISTS stats, players CASCADE")
+        # drop the draft tables too, so every test starts from a clean database
+        conn.execute("DROP TABLE IF EXISTS picks, current_state, groups, stats, players CASCADE")
         players = tmp_path / "players.csv"
         players.write_text("ID,Player,Salary\n1,First Guy,100\n2,Second Guy,200\n3,Third Guy,300\n")
         assert process_file(players)["ok"]

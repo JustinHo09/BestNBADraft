@@ -34,6 +34,25 @@ The last one runs the tests. Be careful with it, the database tests drop the tab
 
 The app uses DATABASE_URL if it's set and the local nba_draft database if not, so when we host it we just set that and nothing else changes.
 
+## Draft board
+
+Load the players first at http://127.0.0.1:5001 like before. Once the file loads, the upload page lists every player with their name, position and team. Then open http://127.0.0.1:5001/draft, name 3 to 5 teams, set the salary cap (defaults to $110M) and hit Start draft. Whose turn it is shows at the top. Type a player ID (or click a row in Available players) and press Enter. The name gets revealed, then hit Next turn (or Enter again) and it moves to the next team. After the last team it wraps to the next round. The grid shows every pick and each team's money left.
+
+The available list doesn't show names since it's a blind draft. It will reject a player who's already taken, an ID that doesn't exist, a player with no salary, or anyone the team can't afford. New draft at the bottom lets you set up a new one. The old picks only get cleared once you hit Start draft, and Cancel takes you back. Other screens like a projector or phones pick up new picks within about 3 seconds.
+
+The page is src/draft.html. It's plain HTML and JS with no build step. All the data comes from the JSON routes listed at the top of src/app.py, so Xavier can restyle it or rebuild it as long as he calls those. The turn logic is Justin's from draft.py and group.py. I fixed a few things in it to get a full draft running:
+
+- make_pick looked up turn["group_id"] but current_pick returns "group", so every pick crashed with a KeyError.
+- check_in_budget compared the salary to the whole cap instead of the money left, so a team could spend $110M every round.
+- new_draft did nothing when given the wrong number of teams, and current_pick crashed if no draft existed. Both raise clear errors now.
+- Re-importing players after a draft started failed because picks point at players. Now importing clears the picks and sends the draft back to pick 1.
+- test_group.py was still building Group the old way, so it errored. I updated it and added a budget test.
+- get_draft_data returns a few more fields for the page: pick number, team name, whether this turn's pick is made, and salaries.
+
+tests/test_draft_flow.py runs whole drafts through the API (picks, next turn, budget, bad IDs, 10 rounds ending the draft). All 50 tests pass.
+
+Not in this version: undo, the timer, trading, music, and snake order. Picks go 1, 2, 3, 1, 2, 3 every round for now.
+
 ## What I changed from the SQLite version
 
 A few things kept the old version from running. main() called readFile() without a file name and nothing called main(). df.loc[:,2] throws a KeyError since the columns have names, not numbers. The players CREATE TABLE was missing its parentheses and the stats one never ran. Every stat was NOT NULL, but Master.xlsx has 27 blank salaries and 82 blank 3P%, so the first blank killed the insert. The insert loop went over the column names instead of the rows, the SQL was built with + (which breaks on Shaquille O'Neal), and there was no commit(), so nothing ever saved.
