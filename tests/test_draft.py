@@ -9,8 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from draft import PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick, na, set_up_draft, \
-    new_draft, current_pick, make_pick, undo, continue_turn, get_draft_data  # noqa: E402
+from draft import PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick, na, set_up_draft, new_draft, current_pick, make_pick, undo, continue_turn, get_draft_data  # noqa: E402
 from processInput import process_file  # noqa: E402
 from group import load_group_data
 
@@ -158,6 +157,27 @@ def test_current_pick(db):
     assert turn["pick_number"] == 1
     assert turn["round"] == 1
     assert turn["group"] == 1
+
+def continue_no_pick(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    continue_turn(db)
+    assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 1
+
+def continue_turn_test(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    make_pick(db, 1)
+    assert continue_turn(db) == True
+    assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 2
+
+def continue_turn_double_continue(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    make_pick(db, 1)
+    assert continue_turn(db) == True
+    continue_turn(db)
+    assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 2
 
 def test_group(db):
     set_up_draft(db)

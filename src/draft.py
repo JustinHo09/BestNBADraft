@@ -128,6 +128,7 @@ def continue_turn(conn):
     if picked is None:
         raise NoPickError("No pick has been made this turn")
     conn.execute("UPDATE current_state SET current_pick = current_pick + 1")
+    return True
 
 def make_pick(conn, player_id):
     turn = current_pick(conn)
