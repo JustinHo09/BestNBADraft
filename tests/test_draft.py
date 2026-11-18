@@ -232,4 +232,26 @@ def multi_undo(db):
     assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
     assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 1
 
+def make_pick_test(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    make_pick(db, 1)
+    group, round = db.execute("SELECT group_id, round FROM picks WHERE player_id =1").fetchone()
+    assert round == 1
+    assert group == 0
+    assert db.execute("SELECT selected FROM players WHERE id = 1").fetchone()[0] == True
+
+def make_pick_only_one(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    assert make_pick(db, 1) == True
+    make_pick(db, 2)
+
+def make_pick_over_fail(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 10)
+    make_pick(db,1)
+    assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
+
+
 
