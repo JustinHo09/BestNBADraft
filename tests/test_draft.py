@@ -9,7 +9,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from draft import PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick, na, set_up_draft, new_draft, current_pick  # noqa: E402
+from draft import PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick, na, set_up_draft, \
+    new_draft, current_pick, make_pick, undo, continue_turn, get_draft_data  # noqa: E402
 from processInput import process_file  # noqa: E402
 from group import load_group_data
 
@@ -170,3 +171,42 @@ def test_group_salary_down(db):
     db.execute("INSERT INTO picks VALUES (1,1,%s,1)", (first_group,),)
     group = load_group_data(db, first_group)
     assert group.remaining == 1000000-100
+
+def cannot_undo_start(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    assert undo(db) == False
+
+def verify_undo(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    make_pick(db, 1)
+    continue_turn(db)
+    assert undo(db) == True
+    assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
+    assert db.execute("SELECT selected FROM players WHERE id = 1").fetchone()[0] == False
+    assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 1
+    groups = load_group_data(db, 1)
+    assert groups.remaining == 1000000
+
+def undo_player_reselectable(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    make_pick(db, 1)
+    continue_turn(db)
+    undo(db)
+    make_pick(db, 1)
+    assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 1
+
+def multi_undo(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
+    make_pick(db, 1)
+    continue_turn(db)
+    make_pick(db, 2)
+    continue_turn(db)
+    undo(db)
+    undo(db)
+    assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
+    assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 1
+

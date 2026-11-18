@@ -193,3 +193,24 @@ def get_available_players(conn, limit=500):
                         "ORDER BY s.pts DESC NULLS LAST, p.id LIMIT %s", (limit,)).fetchall()
     return [{"id": r[0], "position": na(r[1]), "g": r[2], "pts": r[3], "trb": r[4], "ast": r[5],
              "fg_pct": r[6], "salary": r[7]} for r in rows]
+
+# Will undo a turn from the back end, so after this the front end must be reupdated again
+# Returns true if this operation as successful mainly for purposes of testing
+def undo(conn):
+    # Check if it is possible to undo
+    last_turn = conn.execute("SELECT current_pick FROM current_state").fetchone()
+
+    if last_turn is None or last_turn[0] < 1:
+        return False
+    last_turn = last_turn[0] -1
+
+    player = conn.execute("SELECT player_id FROM picks WHERE pick_number = %s", (last_turn,)).fetchone()
+
+    if player is None:
+        return False
+
+    conn.execute("DELETE FROM picks WHERE pick_number = %s", (last_turn,))
+    conn.execute("UPDATE players set selected = false WHERE id = %s", (player[0],))
+    conn.execute("UPDATE current_state set current_pick =%s", (last_turn,))
+
+    return True
