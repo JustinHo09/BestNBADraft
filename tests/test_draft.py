@@ -158,20 +158,20 @@ def test_current_pick(db):
     assert turn["round"] == 1
     assert turn["group"] == 1
 
-def continue_no_pick(db):
+def test_continue_no_pick(db):
     set_up_draft(db)
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
     continue_turn(db)
     assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 1
 
-def continue_turn_test(db):
+def test_continue_turn_test(db):
     set_up_draft(db)
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
     make_pick(db, 1)
     assert continue_turn(db) == True
     assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 2
 
-def continue_turn_double_continue(db):
+def test_continue_turn_double_continue(db):
     set_up_draft(db)
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
     make_pick(db, 1)
@@ -194,12 +194,12 @@ def test_group_salary_down(db):
     group = load_group_data(db, first_group)
     assert group.remaining == 1000000-100
 
-def cannot_undo_start(db):
+def test_cannot_undo_start(db):
     set_up_draft(db)
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
     assert undo(db) == False
 
-def verify_undo(db):
+def test_verify_undo(db):
     set_up_draft(db)
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
     make_pick(db, 1)
@@ -211,7 +211,7 @@ def verify_undo(db):
     groups = load_group_data(db, 1)
     assert groups.remaining == 1000000
 
-def undo_player_reselectable(db):
+def test_undo_player_reselectable(db):
     set_up_draft(db)
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
     make_pick(db, 1)
@@ -220,7 +220,7 @@ def undo_player_reselectable(db):
     make_pick(db, 1)
     assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 1
 
-def multi_undo(db):
+def test_multi_undo(db):
     set_up_draft(db)
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
     make_pick(db, 1)
@@ -232,7 +232,7 @@ def multi_undo(db):
     assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
     assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 1
 
-def make_pick_test(db):
+def test_make_pick_test(db):
     set_up_draft(db)
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
     make_pick(db, 1)
@@ -241,17 +241,45 @@ def make_pick_test(db):
     assert group == 0
     assert db.execute("SELECT selected FROM players WHERE id = 1").fetchone()[0] == True
 
-def make_pick_only_one(db):
+def test_make_pick_only_one(db):
     set_up_draft(db)
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
     assert make_pick(db, 1) == True
     make_pick(db, 2)
 
-def make_pick_over_fail(db):
+def test_make_pick_over_fail(db):
     set_up_draft(db)
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 10)
     make_pick(db,1)
     assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
+
+def test_get_draft_data_default(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 10)
+    data = get_draft_data(db)
+    assert data["picks"] == []
+    groups = [g for g in data["group_name"]]
+    assert groups == ["Jean Grey", "Archie Grey", "Gris"]
+    money = [g["money_left"] for g in data["groups"]]
+    assert money == [10,10,10]
+
+def test_turn_updates_draft_data(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 10)
+    make_pick(db, 1)
+    data = get_draft_data(db)
+    pick = data["picks"][0]
+    assert pick["round"] == 1
+    assert pick["seat"] == 1
+    assert pick["name"] == "Jean Grey"
+    assert pick["player_id"] == 1
+
+def test_draft_data_final(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 10)
+    db.execute("UPDATE current_state SET current_pick = 31")
+    data = get_draft_data(db)
+    assert data["seat"] is None
 
 
 
