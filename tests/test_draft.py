@@ -119,7 +119,9 @@ def test_middle_pick_seat():
     assert seat_pick(3, 5) == (3, 1)
 
 def test_new_round_pick_seat():
-    assert seat_pick(4,3) == (1,2)
+    assert seat_pick(4,3) == (3,2)
+    assert seat_pick(5, 3) == (2, 2)
+    assert seat_pick(6, 3) == (1, 2)
 
 def test_invalid_groups_pick_seat():
     assert seat_pick(4,0) == (-1,-1)
@@ -209,4 +211,5 @@ def multi_undo(db):
     undo(db)
     assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
     assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 1
+
 

@@ -59,6 +59,8 @@ def seat_pick(pick_number, num_groups):
     if 0 < pick_number and 2 < num_groups < 6:
         group = (pick_number-1) % num_groups + 1
         round = (pick_number-1) // num_groups + 1
+        if round % 2 == 0:
+            group = num_groups - group + 1
         return group, round
     return -1,-1
 
