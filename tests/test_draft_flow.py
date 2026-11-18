@@ -91,7 +91,7 @@ def test_everything_shows_when_the_draft_is_over(client):
 
 def test_next_turn_moves_to_the_next_team_then_the_next_round(client):
     start(client)
-    expected = [(1, 2, "B"), (1, 3, "C"), (2, 1, "A")]   # after picks 1, 2, 3
+    expected = [(1, 2, "B"), (1, 3, "C"), (2, 3, "C")]  # after picks 1, 2, 3 (snake order, round 2 starts with C)
     for player_id, (rnd, seat, team) in zip([1, 2, 3], expected):
         assert client.post("/api/draft/pick", json={"player_id": player_id}).status_code == 200
         d = client.post("/api/draft/next").get_json()["draft"]
@@ -182,3 +182,19 @@ def test_player_list_for_the_import_page(client, tmp_path):
         {"name": "Kevin Garnett", "position": "PF", "team": "MIN"},
         {"name": "LeBron James", "position": "SF", "team": "CLE"},
     ]
+
+
+
+def test_undo_takes_back_the_pick_before_next_turn(client):
+    start(client)
+    client.post("/api/draft/pick", json={"player_id": 1})
+    client.post("/api/draft/next")
+    client.post("/api/draft/pick", json={"player_id": 2})   # B picks, Next turn not hit yet
+    d = client.post("/api/draft/undo").get_json()["draft"]
+    assert d["pick_number"] == 2 and d["pick_made"] is False   # still B's turn
+    assert [p["pick_number"] for p in d["picks"]] == [1]        # A's pick is still there
+
+
+def test_undo_with_nothing_to_undo(client):
+    start(client)
+    assert client.post("/api/draft/undo").status_code == 400

@@ -205,9 +205,12 @@ def undo(conn):
 
     if last_turn is None or last_turn[0] < 1:
         return False
-    last_turn = last_turn[0] -1
+    last_turn = last_turn[0]
 
     player = conn.execute("SELECT player_id FROM picks WHERE pick_number = %s", (last_turn,)).fetchone()
+    if player is None:
+        last_turn = last_turn -1
+        player = conn.execute("SELECT player_id FROM picks WHERE pick_number = %s", (last_turn,)).fetchone()
 
     if player is None:
         return False

@@ -5,11 +5,10 @@ Bare-minimum web server for the "import player's dataset" story.
 
 GET  /                  -> upload.html (drop a .csv/.xlsx file)
 POST /upload            -> runs processInput.process_file on it, answers with JSON
-GET  /players           -> first few loaded players, just to prove the data is in Postgres
-POST /players/<id>/lock -> lock a player once he's drafted (409 if already taken)
+
 
 Xavier can restyle upload.html or move the form into the real front end. The only
-contract is: POST the file to /upload as form field "file", read back the JSON.
+necessity is: POST the file to /upload as form field "file", read back the JSON.
 """
 
 # routes added for the draft board (the /api/draft ones send back the whole board as "draft")
@@ -19,6 +18,7 @@ contract is: POST the file to /upload as form field "file", read back the JSON.
 # POST /api/draft/new            {"group_names": [3 to 5 names], "salary_cap": 110000000}
 # POST /api/draft/pick           {"player_id": 13070} for whoever is on the clock
 # POST /api/draft/next           next turn (only after a pick)
+# POST /api/draft/undo           takes back the last pick (even if Next turn wasn't hit yit)
 # GET  /api/players/available    undrafted players with no names since it's a blind draft
 # picks show as "Pick locked in" until every team has picked that round (see hide_current_round)
 
@@ -42,10 +42,10 @@ from draft import (
     continue_turn,
     get_available_players,
     get_draft_data,
-    lock_player,
     make_pick,
     new_draft,
     set_up_draft,
+    undo
 )
 from processInput import SUPPORTED_EXTENSIONS, get_connection, loaded_players, process_file
 
@@ -53,6 +53,8 @@ HERE = Path(__file__).parent
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB. Master.xlsx is about 90 KB.
+
+#
 
 
 @app.get("/")
@@ -84,23 +86,6 @@ def upload():
 
     return jsonify(result), (200 if result["ok"] else 400)
 
-
-@app.get("/players")
-def players():
-    try:
-        with get_connection() as conn:
-            total = conn.execute("SELECT COUNT(*) FROM players").fetchone()[0]
-            rows = conn.execute(
-                "SELECT p.id, p.name, s.team, s.position, s.salary "
-                "FROM players p JOIN stats s ON s.id = p.id ORDER BY p.id LIMIT 10"
-            ).fetchall()
-        return jsonify(ok=True, total_players=total, first_10=[
-            {"id": r[0], "name": r[1], "team": r[2], "position": r[3], "salary": r[4]} for r in rows
-        ])
-    except Exception as e:  # tables not created yet, DB down, etc.
-        return jsonify(ok=False, message=f"Couldn't read players: {type(e).__name__}"), 500
-
-
 @app.get("/api/players")
 def all_players():
     try:
@@ -112,22 +97,6 @@ def all_players():
     except psycopg.Error as e:
         return jsonify(ok=False, total=0, players=[], message=f"Couldn't load players: {type(e).__name__}"), 500
 
-
-@app.post("/players/<int:player_id>/lock")
-def lock(player_id):
-    try:
-        with get_connection() as conn:
-            lock_player(conn, player_id)
-    except PlayerNotFoundError as e:
-        return jsonify(ok=False, message=str(e)), 404
-    except PlayerAlreadyLockedError as e:
-        return jsonify(ok=False, message=str(e)), 409
-    except psycopg.Error as e:
-        return jsonify(ok=False, message=f"Database error, player not locked: {type(e).__name__}"), 500
-    return jsonify(ok=True, message=f"Player {player_id} is locked.")
-
-
-# draft routes
 
 # which status code each of Justin's draft errors sends back
 DRAFT_ERRORS = {
@@ -238,7 +207,16 @@ def draft_pick():
 
 @app.post("/api/draft/next")
 def draft_next():
-    return draft_action(continue_turn)
+    def next_turn(conn):
+        continue_turn(conn)
+    return draft_action(next_turn)
+
+@app.post("/api/draft/undo")
+def draft_undo():
+    def undo_last(conn):
+        if not undo(conn):
+            raise ValueError("There's no pick to undo.")
+    return draft_action(undo_last)
 
 
 @app.get("/api/players/available")

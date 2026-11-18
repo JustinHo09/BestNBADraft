@@ -49,6 +49,7 @@
     </form>
     <p id="reveal"></p>
     <button id="next-btn" type="button">Next turn</button>
+    <button id="undo-btn" type="button">Undo last pick</button>
     <p id="pick-msg" class="err"></p>
 
     <table id="board"></table>
@@ -125,6 +126,7 @@ function show() {
 
 function showTurn() {
   const d = state.draft;
+  $("undo-btn").disabled = d.picks.length == 0;
   // show how many players have been drafted once a round is done
   if (d.is_over) {
     $("round-done").textContent = "All " + d.drafted + " players drafted.";
@@ -244,6 +246,17 @@ $("next-btn").onclick = async () => {
   $("player-id").focus();
 };
 
+
+$("undo-btn").onclick = async () =>{
+  $("pick-msg").textContent = "";
+  const data = await api("api/draft/undo", {});
+  if (!data.ok) { $("pick-msg").textContent = data.message; return; }
+  state.draft = data.draft;
+  show();
+  //makes sure the player goes back in the available list
+  loadAvailable();
+}
+
 $("search").oninput = showAvailable;
 $("players").onclick = (e) => {
   const row = e.target.closest("tr[data-id]");
@@ -255,8 +268,6 @@ $("players").onclick = (e) => {
 // start
 teamInputs(["Team 1", "Team 2", "Team 3"]);
 refresh().then(loadAvailable);
-// checks every 3 seconds so other screens (projector, phones) keep up with the picks
-setInterval(() => { if (!document.hidden && !setupOpen) refresh(); }, 3000);
 </script>
 </body>
 </html>

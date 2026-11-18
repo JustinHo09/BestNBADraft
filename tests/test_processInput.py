@@ -169,8 +169,6 @@ def test_upload_route(db, tmp_path):
     assert res.status_code == 200 and res.get_json()["players_loaded"] == 1
     res = client.post("/upload", data={"file": (open(csv_path, "rb"), "players.txt")})
     assert res.status_code == 400
-    assert client.get("/players").get_json()["total_players"] == 1
-
 
 # separate first and last name columns
 

@@ -9,7 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from draft import PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick, na, set_up_draft, new_draft, current_pick, make_pick, undo, continue_turn, get_draft_data  # noqa: E402
+from draft import NoPickError, OverBudgetError, PickAlreadyMadeError, PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick, na, set_up_draft, new_draft, current_pick, make_pick, undo, continue_turn, get_draft_data  # noqa: E402
 from processInput import process_file  # noqa: E402
 from group import load_group_data
 
@@ -86,28 +86,6 @@ def test_locking_an_unknown_id_is_an_error(db):
         is_locked(db, 999)
 
 
-def test_lock_route(db):
-    from app import app
-    client = app.test_client()
-
-    res = client.post("/players/3/lock")
-    assert res.status_code == 200 and res.get_json()["ok"] is True
-
-    res = client.post("/players/3/lock")
-    assert res.status_code == 409 and res.get_json()["ok"] is False
-
-    res = client.post("/players/999/lock")
-    assert res.status_code == 404 and res.get_json()["ok"] is False
-
-    assert is_locked(db, 3) is True
-
-
-def test_lock_route_when_database_is_down(db, monkeypatch):
-    from app import app
-    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost:1/nothing_here")
-    res = app.test_client().post("/players/1/lock")
-    assert res.status_code == 500 and res.get_json()["ok"] is False
-
 def test_first_pick_seat():
     assert seat_pick(1,3) == (1,1)
 
@@ -161,7 +139,8 @@ def test_current_pick(db):
 def test_continue_no_pick(db):
     set_up_draft(db)
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
-    continue_turn(db)
+    with pytest.raises(NoPickError):
+        continue_turn(db)
     assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 1
 
 def test_continue_turn_test(db):
@@ -176,7 +155,8 @@ def test_continue_turn_double_continue(db):
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
     make_pick(db, 1)
     assert continue_turn(db) == True
-    continue_turn(db)
+    with pytest.raises(NoPickError):
+        continue_turn(db)
     assert db.execute("SELECT current_pick FROM current_state").fetchone()[0] == 2
 
 def test_group(db):
@@ -238,19 +218,21 @@ def test_make_pick_test(db):
     make_pick(db, 1)
     group, round = db.execute("SELECT group_id, round FROM picks WHERE player_id =1").fetchone()
     assert round == 1
-    assert group == 0
+    assert group == 1
     assert db.execute("SELECT selected FROM players WHERE id = 1").fetchone()[0] == True
 
 def test_make_pick_only_one(db):
     set_up_draft(db)
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
-    assert make_pick(db, 1) == True
-    make_pick(db, 2)
+    assert make_pick(db, 1)["pick_number"] == 1
+    with pytest.raises(PickAlreadyMadeError):
+        make_pick(db, 2)
 
 def test_make_pick_over_fail(db):
     set_up_draft(db)
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 10)
-    make_pick(db,1)
+    with pytest.raises(OverBudgetError):
+        make_pick(db,1)
     assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
 
 def test_get_draft_data_default(db):
@@ -258,20 +240,20 @@ def test_get_draft_data_default(db):
     new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 10)
     data = get_draft_data(db)
     assert data["picks"] == []
-    groups = [g for g in data["group_name"]]
+    groups = [g["name"] for g in data["groups"]]
     assert groups == ["Jean Grey", "Archie Grey", "Gris"]
     money = [g["money_left"] for g in data["groups"]]
     assert money == [10,10,10]
 
 def test_turn_updates_draft_data(db):
     set_up_draft(db)
-    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 10)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 1000000)
     make_pick(db, 1)
     data = get_draft_data(db)
     pick = data["picks"][0]
     assert pick["round"] == 1
     assert pick["seat"] == 1
-    assert pick["name"] == "Jean Grey"
+    assert pick["name"] == "First Guy"
     assert pick["player_id"] == 1
 
 def test_draft_data_final(db):

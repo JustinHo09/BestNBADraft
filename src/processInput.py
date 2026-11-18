@@ -357,10 +357,7 @@ def load_into_db(df: pd.DataFrame, conn: psycopg.Connection) -> None:
             insert_stats(df, cursor)
 
 
-# ---------------------------------------------------------------------------
-# The one function the web app calls. It never raises; it always returns a result.
-# ---------------------------------------------------------------------------
-
+# web app calls this code
 def process_file(filename) -> dict:
     """
     Read + load a player file. Returns:
