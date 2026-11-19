@@ -16,8 +16,12 @@ import os
 import tempfile
 from pathlib import Path
 
+from spotipy import Spotify
+from spotipy.oauth2 import SpotifyOAuth
+from spotipy.cache_handler import FlaskSessionChacheHandler
+
 import psycopg
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory,redirect, session, url_for
 from werkzeug.utils import secure_filename
 
 from draft import PlayerAlreadyLockedError, PlayerNotFoundError, lock_player
@@ -26,7 +30,28 @@ from processInput import SUPPORTED_EXTENSIONS, get_connection, process_file
 HERE = Path(__file__).parent
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB. Master.xlsx is about 90 KB.
+app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB. Master.xlsx is about 90 KB.\
+
+#remember to make secret key a fixed string and stored safely
+app.config['Secret_Key'] = os.urandom(64)
+
+#store these in a safer location later
+client_id = 'ce8e48cc4fa34b7983e63f7daa1fed8e'
+client_secret = '3f4bd4c2bf6d455ea0f72fe6000a1579'
+redirect_uri = 'http://127.0.0.1:5001'
+scope = 'playlist-read-private,stream'
+
+chache_handler = FlaskSessionChacheHandler(session)
+sp_oauth = SpotifyOAuth(
+    client_id = client_id,
+    client_secret = client_secret,
+    redirect_uri = redirect_uri,
+    scope = scope,
+    cache_handler = chache_handler,
+    show_dialog = True
+)
+
+sp = Spotify(auth_manager = sp_oauth)
 
 
 @app.get("/")
@@ -88,9 +113,39 @@ def lock(player_id):
 def too_big(_error):
     return jsonify(ok=False, message="File is too big (5 MB max).", warnings=[]), 413
 
+@app.route('/')
+def home():
+    if not sp_oauth.validate_token(chache_handler.get_cached_token()):
+        auth_url = sp_oauth.get_authorize_url()
+        return redirect(auth_url)
+    return redirect(url_for('get_playlists'))
+
+@app.route('/callback')
+def callback():
+    sp_oauth.getaccess_token(request.args['code'])
+    return redirect(url_for('get_playlists'))
+
+@app.route('/get_playlists')
+def get_playlists():
+    if not sp_oauth.validate_token(chache_handler.get_cached_token()):
+        auth_url = sp_oauth.get_authorize_url()
+        return redirect(auth_url)
+
+    playlists = sp.current_user_playlists()
+    playlists_info = [(pl['name'], pl['external_urls']['spotify']) for pl in playlists['items']]
+    playlists_html = '<br>'.join([f'{name}: {url}' for name, url in playlists_info])
+
+    return playlists_html
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('home'))
+
 
 if __name__ == "__main__":
     # Not Flask's default 5000: on newer Macs, AirPlay Receiver already listens on 5000.
     # Debug mode is off unless FLASK_DEBUG=1. Its in-browser debugger can run any Python code,
     # so it should never be on by accident (for example on a hosted server).
     app.run(debug=os.environ.get("FLASK_DEBUG") == "1", port=5001)
+    app.run(debug=True)
