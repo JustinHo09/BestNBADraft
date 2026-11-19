@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Draft timer</title>
+<style>
+  :root {
+    --text: #1d2420;
+    --muted: #5f6b64;
+    --accent: #1f6b4a;
+    --accent-text: #ffffff;
+    --border: #c9d1cb;
+    --alert: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: grid;
+    place-items: center;
+  }
+  main { text-align: center; padding: 24px; }
+  #display {
+    font-size: clamp(4rem, 22vw, 9rem);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    margin: 0 0 8px;
+  }
+  #display.finished { color: var(--alert); }
+  #status { color: var(--muted); min-height: 1.5em; margin: 0 0 28px; }
+  .buttons { display: flex; gap: 12px; justify-content: center; }
+  button {
+    font: inherit;
+    font-weight: 600;
+    min-width: 120px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<main>
+  <p id="display" role="timer" aria-live="off">02:00</p>
+  <p id="status" aria-live="polite">Ready</p>
+  <div class="buttons">
+    <button id="toggle" class="primary">Start</button>
+    <button id="reset">Reset</button>
+  </div>
+</main>
+
+<script>
+  const display = document.getElementById("display");
+  const statusText = document.getElementById("status");
+  const toggleBtn = document.getElementById("toggle");
+  const resetBtn = document.getElementById("reset");
+
+  let state = { remaining: 120, running: false, finished: false, total: 120 };
+  let lastSync = Date.now();   // when we last heard from the server
+
+  function format(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
+  }
+
+  function render() {
+    // Between server updates, count down locally so the display stays smooth.
+    let shown = state.remaining;
+    if (state.running) {
+      shown = Math.max(0, state.remaining - Math.floor((Date.now() - lastSync) / 1000));
+    }
+    display.textContent = format(shown);
+    display.classList.toggle("finished", state.finished);
+
+    if (state.finished) {
+      statusText.textContent = "Time is up";
+      toggleBtn.textContent = "Start";
+      toggleBtn.disabled = true;
+    } else if (state.running) {
+      statusText.textContent = "Running";
+      toggleBtn.textContent = "Pause";
+      toggleBtn.disabled = false;
+    } else if (state.remaining < state.total) {
+      statusText.textContent = "Paused";
+      toggleBtn.textContent = "Resume";
+      toggleBtn.disabled = false;
+    } else {
+      statusText.textContent = "Ready";
+      toggleBtn.textContent = "Start";
+      toggleBtn.disabled = false;
+    }
+  }
+
+  async function call(path, method) {
+    try {
+      const res = await fetch(path, { method });
+      state = await res.json();
+      lastSync = Date.now();
+    } catch (err) {
+      statusText.textContent = "Can’t reach the server";
+      return;
+    }
+    render();
+  }
+
+  toggleBtn.addEventListener("click", () => {
+    call(state.running ? "/timer/pause" : "/timer/start", "POST");
+  });
+  resetBtn.addEventListener("click", () => call("/timer/reset", "POST"));
+
+  // Re-sync with the server every 2 seconds (keeps several browsers in agreement).
+  setInterval(() => call("/timer/state", "GET"), 2000);
+  // Redraw every 250 ms between syncs.
+  setInterval(render, 250);
+  call("/timer/state", "GET");
+</script>
+</body>
+</html>
