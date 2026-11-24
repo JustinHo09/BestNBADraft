@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Draft player</title>
+<style>
+  :root {
+    --bg: #f5f6f4;
+    --text: #1d2420;
+    --muted: #5f6b64;
+    --accent: #1f6b4a;
+    --accent-text: #ffffff;
+    --border: #c9d1cb;
+    --alert: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: grid;
+    place-items: center;
+  }
+  main { width: min(420px, 100%); padding: 24px; text-align: center; }
+  h1 { font-size: 1.25rem; margin: 0 0 16px; }
+  #cover {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: 8px;
+    background: var(--border);
+    margin-bottom: 16px;
+  }
+  #track { font-size: 1.25rem; font-weight: 600; margin: 0 0 4px; }
+  #artist { color: var(--muted); margin: 0 0 20px; }
+  #status { color: var(--muted); min-height: 3em; margin: 0 0 20px; }
+  #status.error { color: var(--alert); }
+  .controls { display: flex; gap: 12px; justify-content: center; }
+  button, .login-link {
+    font: inherit;
+    font-weight: 600;
+    min-width: 88px;
+    padding: 12px 18px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+  }
+  #toggle, .login-link { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible, .login-link:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <section id="login" hidden>
+    <h1>Draft player</h1>
+    <p id="login-message">Log in with a Spotify Premium account to play music here.</p>
+    <a class="login-link" href="/auth/login">Log in with Spotify</a>
+  </section>
+
+  <section id="player" hidden>
+    <img id="cover" alt="" hidden>
+    <p id="track">Nothing playing</p>
+    <p id="artist"></p>
+    <p id="status">Connecting to Spotify…</p>
+    <div class="controls">
+      <button id="prev" disabled aria-label="Previous track">Previous</button>
+      <button id="toggle" disabled>Play</button>
+      <button id="next" disabled aria-label="Next track">Next</button>
+    </div>
+  </section>
+</main>
+
+<script>
+  const PLAYER_NAME = "Draft Player";
+
+  const loginSection = document.getElementById("login");
+  const playerSection = document.getElementById("player");
+  const statusEl = document.getElementById("status");
+  const coverEl = document.getElementById("cover");
+  const trackEl = document.getElementById("track");
+  const artistEl = document.getElementById("artist");
+  const prevBtn = document.getElementById("prev");
+  const toggleBtn = document.getElementById("toggle");
+  const nextBtn = document.getElementById("next");
+
+  function setStatus(message, isError = false) {
+    statusEl.textContent = message;
+    statusEl.classList.toggle("error", isError);
+  }
+
+  // Ask our Flask server for a token. The SDK calls this whenever it needs one,
+  // so an expiring token is refreshed automatically by the server.
+  async function fetchToken() {
+    const res = await fetch("/auth/token");
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.access_token;
+  }
+
+  function startPlayer() {
+    // This function name is what the SDK looks for once its script has loaded.
+    window.onSpotifyWebPlaybackSDKReady = () => {
+      const player = new Spotify.Player({
+        name: PLAYER_NAME,
+        getOAuthToken: async (callback) => {
+          const token = await fetchToken();
+          if (token) callback(token);
+          else window.location.href = "/auth/login";
+        },
+        volume: 0.5,
+      });
+
+      player.addListener("ready", ({ device_id }) => {
+        console.log("Ready with device ID", device_id);
+        setStatus(`Connected. Open Spotify, click the Devices button, and choose “${PLAYER_NAME}”.`);
+        [prevBtn, toggleBtn, nextBtn].forEach((b) => (b.disabled = false));
+      });
+
+      player.addListener("not_ready", ({ device_id }) => {
+        console.log("Device went offline", device_id);
+        setStatus("Lost connection to Spotify. Reload the page to reconnect.", true);
+        [prevBtn, toggleBtn, nextBtn].forEach((b) => (b.disabled = true));
+      });
+
+      player.addListener("player_state_changed", (state) => {
+        if (!state) return;  // playback was moved to another device
+        const track = state.track_window.current_track;
+        trackEl.textContent = track.name;
+        artistEl.textContent = track.artists.map((a) => a.name).join(", ");
+        const image = track.album.images[0];
+        coverEl.hidden = !image;
+        if (image) coverEl.src = image.url;
+        toggleBtn.textContent = state.paused ? "Play" : "Pause";
+        setStatus(state.paused ? "Paused" : "Playing");
+      });
+
+      player.addListener("initialization_error", ({ message }) =>
+        setStatus("This browser can’t play Spotify audio: " + message, true));
+      player.addListener("authentication_error", () => {
+        setStatus("Spotify login expired. Redirecting to log in…", true);
+        window.location.href = "/auth/login";
+      });
+      player.addListener("account_error", () =>
+        setStatus("Spotify Premium is required to play music in the browser.", true));
+      player.addListener("playback_error", ({ message }) =>
+        setStatus("Playback error: " + message, true));
+
+      prevBtn.addEventListener("click", () => player.previousTrack());
+      toggleBtn.addEventListener("click", () => player.togglePlay());
+      nextBtn.addEventListener("click", () => player.nextTrack());
+
+      player.connect();
+    };
+
+    const script = document.createElement("script");
+    script.src = "https://sdk.scdn.co/spotify-player.js";
+    script.async = true;
+    document.body.appendChild(script);
+  }
+
+  async function init() {
+    let token = null;
+    try {
+      token = await fetchToken();
+    } catch (err) {
+      document.getElementById("login-message").textContent = "Can’t reach the server.";
+    }
+    if (token) {
+      playerSection.hidden = false;
+      startPlayer();
+    } else {
+      loginSection.hidden = false;
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>
