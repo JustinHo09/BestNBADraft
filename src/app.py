@@ -23,7 +23,7 @@ from werkzeug.utils import secure_filename
 from draft import PlayerAlreadyLockedError, PlayerNotFoundError, lock_player
 from processInput import SUPPORTED_EXTENSIONS, get_connection, process_file
 from timer import timer_bp
-
+from spotify_player import spotify_bp
 
 
 HERE = Path(__file__).parent
@@ -31,6 +31,8 @@ HERE = Path(__file__).parent
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB. Master.xlsx is about 90 KB.
 app.register_blueprint(timer_bp)
+app.secret_key = os.environ["FLASK_SECRET_KEY"]
+app.register_blueprint(spotify_bp)
 
 
 
