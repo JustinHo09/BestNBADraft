@@ -9,7 +9,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from draft import NoPickError, OverBudgetError, PickAlreadyMadeError, PlayerAlreadyLockedError, PlayerNotFoundError, is_locked, lock_player, seat_pick, na, set_up_draft, new_draft, current_pick, make_pick, undo, continue_turn, get_draft_data  # noqa: E402
+from draft import NoPickError, OverBudgetError, PickAlreadyMadeError, PlayerAlreadyLockedError, PlayerNotFoundError, \
+    is_locked, lock_player, seat_pick, na, set_up_draft, new_draft, current_pick, make_pick, undo, continue_turn, \
+    get_draft_data, trade_pick, find_pick_owner, TradeError  # noqa: E402
 from processInput import process_file  # noqa: E402
 from group import load_group_data
 
@@ -24,7 +26,7 @@ def db(monkeypatch, tmp_path):
     monkeypatch.setenv("DATABASE_URL", TEST_DB)
     with psycopg.connect(TEST_DB, autocommit=True) as conn:
         # drop the draft tables too, so every test starts from a clean database
-        conn.execute("DROP TABLE IF EXISTS picks, current_state, groups, stats, players CASCADE")
+        conn.execute("DROP TABLE IF EXISTS trades, picks, current_state, groups, stats, players CASCADE")
         players = tmp_path / "players.csv"
         players.write_text("ID,Player,Salary\n1,First Guy,100\n2,Second Guy,200\n3,Third Guy,300\n")
         assert process_file(players)["ok"]
@@ -120,6 +122,7 @@ def test_set_up_draft(db):
     assert db.execute("SELECT COUNT(*) FROM groups").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
     assert db.execute("SELECT COUNT(*) FROM current_state").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == 0
 
 def test_start_new_draft(db):
     set_up_draft(db)
@@ -244,6 +247,7 @@ def test_get_draft_data_default(db):
     assert groups == ["Jean Grey", "Archie Grey", "Gris"]
     money = [g["money_left"] for g in data["groups"]]
     assert money == [10,10,10]
+    assert data["trades"] == []
 
 def test_turn_updates_draft_data(db):
     set_up_draft(db)
@@ -255,6 +259,7 @@ def test_turn_updates_draft_data(db):
     assert pick["seat"] == 1
     assert pick["name"] == "First Guy"
     assert pick["player_id"] == 1
+    assert pick["slot_seat"] == 1
 
 def test_draft_data_final(db):
     set_up_draft(db)
@@ -262,6 +267,62 @@ def test_draft_data_final(db):
     db.execute("UPDATE current_state SET current_pick = 31")
     data = get_draft_data(db)
     assert data["seat"] is None
+
+def test_trade(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 250)
+    trade_pick(db, 1, 3, 1, 3, 50)
+    assert find_pick_owner(db,1,3) == 3
+    assert find_pick_owner(db, 3, 3) == 1
+    assert load_group_data(db,1).remaining == 200
+    assert load_group_data(db,3).remaining == 300
+
+def test_trade_neg_cash(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 250)
+    trade_pick(db, 1,3,1,3,-50)
+    assert find_pick_owner(db, 1, 3) == 3
+    assert find_pick_owner(db, 3, 3) == 1
+    assert load_group_data(db, 1).remaining == 300
+    assert load_group_data(db, 3).remaining == 200
+
+def test_trade_new_pick_order(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 250)
+    trade_pick(db, 1, 3, 1, 3, 50)
+    assert current_pick(db)["group"] == 3
+    make_pick(db, 1)
+    assert db.execute("SELECT group_id FROM picks WHERE pick_number = 1").fetchone()[0] == 3
+
+# Shuold fail
+def test_traded_pick_fail(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 250)
+    trade_pick(db, 1, 3, 1, 3, 50)
+    make_pick(db, 1)
+    trade_pick(db, 1, 3, 1, 3, 50)
+
+# Should fail
+def test_trade_wrong_pick_group(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 250)
+    trade_pick(db, 1, 3, 2, 3, 50)
+
+   # SHOULD fail
+def test_trade_broke_fail(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 250)
+    trade_pick(db, 1, 3, 1, 3, 500)
+
+def test_trade_undo(db):
+    set_up_draft(db)
+    new_draft(db, ["Jean Grey", "Archie Grey", "Gris"], 250)
+    trade_pick(db, 1, 3, 1, 3, 50)
+    make_pick(db, 1)
+    continue_turn(db)
+    undo(db)
+    assert db.execute("SELECT COUNT(*) FROM picks").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == 1
 
 
 
