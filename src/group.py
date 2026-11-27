@@ -29,6 +29,14 @@ def load_group_data(conn, group_id: int):
     for row in rows:
         spent += row[0]
 
+    trades = conn.execute("SELECT group_1, cash_1_to_2 FROM trades "
+                        "WHERE group_1 = %s or group_2 = %s", (group_id, group_id)).fetchall()
+    for trade in trades:
+        if trade[0] == group_id:
+            spent += trade[1]
+        else:
+            spent -= trade[1]
+
     return Group(group_id,name,cap,spent)
 
 

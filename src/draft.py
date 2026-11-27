@@ -26,6 +26,9 @@ class NoPickError(Exception):
 class NoDraftError(Exception):
     pass
 
+class TradeError(Exception):
+    pass
+
 MIN_GROUP_SIZE = 3
 MAX_GROUP_SIZE = 5
 NUM_ROUNDS = 10
@@ -93,11 +96,20 @@ def set_up_draft(conn):
                  "player_id INTEGER NOT NULL UNIQUE REFERENCES players (id)"
                  ")")
 
-    conn.execute("TRUNCATE TABLE groups, picks, current_state RESTART IDENTITY CASCADE")
+    conn.execute("CREATE TABLE IF NOT EXISTS trades ("
+                 "id SERIAL PRIMARY KEY,"
+                 "group_1 INTEGER NOT NULL REFERENCES groups (id),"
+                 "group_2 INTEGER NOT NULL REFERENCES groups (id),"
+                 "pick_1 INTEGER NOT NULL,"
+                 "pick_2 INTEGER NOT NULL,"
+                 "cash_1_to_2 INTEGER NOT NULL DEFAULT 0"
+                 ")")
+
+    conn.execute("TRUNCATE TABLE groups, picks, current_state, trades RESTART IDENTITY CASCADE")
 
 def new_draft(conn, group_names, salary_cap):
     if MIN_GROUP_SIZE <= len(group_names) <= MAX_GROUP_SIZE and salary_cap > 0:
-        conn.execute("TRUNCATE TABLE groups, picks, current_state RESTART IDENTITY CASCADE")
+        conn.execute("TRUNCATE TABLE groups, picks, current_state, trades RESTART IDENTITY CASCADE")
         conn.execute('UPDATE players SET selected = False')
 
         i=1
@@ -119,7 +131,7 @@ def current_pick(conn):
         raise GameOverError
 
     current_seat, current_round = seat_pick(current_pick, num_groups)
-    current_group = conn.execute("SELECT id FROM groups WHERE seat = %s", (current_seat,)).fetchone()[0]
+    current_group = find_pick_owner(conn, current_pick, num_groups)
     return {"pick_number": current_pick,"round": current_round,"group": current_group}
 
 def continue_turn(conn):
@@ -171,7 +183,14 @@ def get_draft_data(conn):
                         "ORDER BY p.pick_number").fetchall()
     for row in rows:
         picks.append({"round":row[0], "seat":row[1], "name":row[2], "position": na(row[3]),"team":na(row[4]),
-                      "pick_number": row[5], "player_id": row[6], "salary": row[7]})
+                      "pick_number": row[5], "player_id": row[6], "salary": row[7],
+                      "slot_seat": seat_pick(row[5], len(groups))[0]})
+
+    trades = []
+    for row in conn.execute("SELECT id, group_1, group_2, pick_1, pick_2, cash_1_to_2 "
+                            "FROM trades ORDER BY id").fetchall():
+        trades.append({"id": row[0], "group_1":row[1], "group_2":row[2], "pick_1":row[3],
+                       "pick_2":row[4], "cash_1_to_2":row[5]})
 
     pick_number, group_name, pick_made = None, None, False
     try:
@@ -184,7 +203,7 @@ def get_draft_data(conn):
         seat, round = None,None
     return {"groups":groups, "picks":picks, "seat":seat, "round":round,
             "pick_number": pick_number, "group_name": group_name, "pick_made": pick_made,
-            "num_rounds": NUM_ROUNDS, "is_over": seat is None}
+            "num_rounds": NUM_ROUNDS, "is_over": seat is None, "trades": trades}
 
 
 # undrafted players for the list on the board
@@ -220,3 +239,47 @@ def undo(conn):
     conn.execute("UPDATE current_state set current_pick =%s", (last_turn,))
 
     return True
+
+def find_pick_owner(conn, pick_number, num_groups):
+    trade = conn.execute("SELECT group_1, group_2, pick_1 FROM trades "
+                         "WHERE pick_1 = %s OR pick_2 = %s "
+                         "ORDER BY id DESC LIMIT 1", (pick_number, pick_number)).fetchone()
+    if trade is not None:
+        if trade[2] == pick_number:
+            return trade[1]
+        return trade[0]
+    seat, round = seat_pick(pick_number, num_groups)
+    return conn.execute("SELECT id from groups WHERE seat =%s", (seat,)).fetchone()[0]
+
+# neg cash means 2 owes 1 that much money in the trade
+def trade_pick(conn: object, group_1: object, group_2: object, pick_1: object, pick_2: object, cash_1_to_2: object) -> None:
+    if group_1 == group_2:
+        raise TradeError("Group can't trade with itself")
+
+    num_groups = conn.execute("SELECT COUNT(*) FROM groups").fetchone()[0]
+    groups = conn.execute("SELECT COUNT(*) FROM groups WHERE id IN (%s, %s)", (group_1, group_2)).fetchone()[0]
+    if groups != 2:
+        raise TradeError("Both groups need to exist")
+
+    for pick in (pick_1, pick_2):
+        if not 1 <= pick <= num_groups * NUM_ROUNDS:
+            raise TradeError("Pick", pick, "does not exist")
+
+        if conn.execute("SELECT round FROM picks WHERE pick_number = %s", (pick,)).fetchone() is not None:
+            raise TradeError("Pick", pick, "has already been used")
+
+    if find_pick_owner(conn, pick_1, num_groups) != group_1:
+        raise TradeError("Group",group_1, "does not own pick", pick_1)
+    if find_pick_owner(conn, pick_2, num_groups) != group_2:
+        raise TradeError("Group",group_2, "does not own pick", pick_2)
+
+    if cash_1_to_2 >= 0:
+        payer, amount = group_1, cash_1_to_2
+    else:
+        payer, amount = group_2, -cash_1_to_2
+
+    if load_group_data(conn, payer).remaining < amount:
+        raise TradeError("Payer", payer, "does not have enough money")
+
+    conn.execute("INSERT INTO trades (group_1, group_2, pick_1, pick_2, cash_1_to_2) "
+                 "VALUES (%s, %s, %s, %s, %s)", (group_1, group_2, pick_1, pick_2, cash_1_to_2))
